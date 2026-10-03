@@ -1,0 +1,11 @@
+# Secrets: never commit the real .env (use .env.example as the template)
+.env
+# Python / tool caches
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+# Local data (SQLite DB from M1)
+data/
+*.db
