@@ -1,0 +1,15 @@
+# Start with:  docker compose up --build
+# Needs a `.env` file next to this one (copy .env.example and fill it in).
+services:
+  travelkaki:
+    build: .
+    env_file: .env
+    # Only reachable from this machine. The bot uses polling, so no public port is needed.
+    ports:
+      - "127.0.0.1:8000:8000"
+    # SQLite data will live here from M1 on.
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    # Keep RAM use small on a home server.
+    mem_limit: 512m
