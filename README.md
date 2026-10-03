@@ -19,6 +19,24 @@ More in the [wiki](../../wiki).
 
 Python · python-telegram-bot · FastAPI · SQLite/SQLAlchemy · LiteLLM (your own key or Ollama) · Leaflet + OpenStreetMap
 
+## Development
+
+Needs [uv](https://docs.astral.sh/uv/) and Python 3.12.
+
+```bash
+cp .env.example .env          # then paste your BotFather token into .env
+uv sync                       # install dependencies
+uv run pytest                 # tests
+uv run ruff check .           # lint
+uv run uvicorn travelkaki.main:app   # run bot + API (http://127.0.0.1:8000/health)
+```
+
+Or with Docker:
+
+```bash
+docker compose up --build
+```
+
 ## Self-hosting
 
 Coming in M5. See [Self Hosting](../../wiki/Self-Hosting).
