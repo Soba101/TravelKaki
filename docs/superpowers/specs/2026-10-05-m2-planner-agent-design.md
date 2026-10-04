@@ -122,7 +122,7 @@ Returns a list of `Issue(level, code, place_id, day, text)`. **Valid** = no `err
 | `day_too_long` | error | Ends after the window's latest end, or busy span > 12 h |
 | `long_transfer` | error | A hop between stops > 60 min, or a day's first trip > 3 h |
 | `hours_unknown` | warning | No hours for a planned place |
-| `meal_time` | warning | Day has food places but none in 11:00–14:30 or 17:30–21:30 |
+| `meal_time` | warning | Day has meal places (restaurant, ramen, sushi…, not cafes or markets) but none in 11:00–14:30 or 17:30–21:30. Meal places never start before 11:00. |
 | `no_hotel_pin` | warning | The base point is the city centre |
 
 `save_plan` accepts a plan whose only errors are `missing_must` for places that `build_days`

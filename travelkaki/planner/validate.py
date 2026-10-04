@@ -10,13 +10,13 @@ Pure code. Returns a list of Issues. A plan is **valid** when it has no
 | day_too_long  | error   | ends after the day's latest end, or busy > 12 h       |
 | long_transfer | error   | a hop over 60 min (a day's first trip: over 3 h)      |
 | hours_unknown | warning | no hours for a planned place                          |
-| meal_time     | warning | food places on the day, but none at lunch/dinner time |
+| meal_time     | warning | meal places on the day, but none at lunch/dinner time |
 | no_hotel_pin  | warning | days start from the city centre                       |
 """
 
 from travelkaki.planner.fit import MAX_DAY_TRIP, MAX_TRANSFER, hhmm, limits
 from travelkaki.planner.hours import open_through, parse
-from travelkaki.planner.rules import is_food
+from travelkaki.planner.rules import is_meal
 from travelkaki.planner.travel import estimate
 from travelkaki.planner.types import Issue, Plan, PlanInput
 
@@ -57,7 +57,8 @@ def _check_day(n: int, day, inp: PlanInput) -> list[Issue]:
         if finish > latest or finish - begin > span or (inp.window.fixed and begin < start):
             text = f"Day {n} runs too long (back at {hhmm(finish)})"
             out.append(Issue("error", "day_too_long", text, None, n))
-    food = [s for s, p in zip(day.stops, places, strict=True) if p and is_food(p.category)]
+    # Only sit-down meal places count: a morning cafe is not a missed lunch (live demo).
+    food = [s for s, p in zip(day.stops, places, strict=True) if p and is_meal(p.category)]
     meal = any(_overlaps(s.start, s.end, LUNCH) or _overlaps(s.start, s.end, DINNER) for s in food)
     if food and not meal:
         text = f"No meal stop at lunch or dinner time on Day {n}"

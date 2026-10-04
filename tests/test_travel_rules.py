@@ -2,7 +2,7 @@
 
 import pytest
 
-from travelkaki.planner.rules import is_evening, is_food, tier, visit_minutes
+from travelkaki.planner.rules import is_evening, is_meal, tier, visit_minutes
 from travelkaki.planner.travel import estimate
 from travelkaki.planner.types import PlanPlace, Window
 
@@ -45,9 +45,9 @@ def test_visit_minutes(category, minutes):
     assert visit_minutes(category) == minutes
 
 
-def test_is_food():
-    assert is_food("Ramen") and is_food("night market")
-    assert not is_food("museum")
+def test_is_meal():
+    assert is_meal("Ramen") and is_meal("tonkatsu restaurant")
+    assert not is_meal("cafe") and not is_meal("night market") and not is_meal("museum")
 
 
 def _place(category="museum", hours=None):

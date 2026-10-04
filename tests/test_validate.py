@@ -122,3 +122,9 @@ def test_first_stop_may_be_a_long_day_trip():
     inp = make_input([p], days=1)
     assert "long_transfer" not in _codes(validate(_one_stop(p, travel=150), inp))
     assert "long_transfer" in _codes(validate(_one_stop(p, travel=200), inp))
+
+
+def test_morning_cafe_is_not_a_missed_meal():
+    """Live demo: a cafe at 10:00 gave 'No meal stop at lunch'. Only meal places count."""
+    p = place(1, category="cafe", hours="24/7")
+    assert _codes(validate(_one_stop(p, start=600), make_input([p], days=1))) == []
