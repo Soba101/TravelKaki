@@ -21,3 +21,15 @@ def test_reads_token_and_defaults(monkeypatch):
     assert s.video_fetch is False
     assert s.run_bot is True
     assert s.llm_api_key is None
+
+
+def test_m1_defaults(monkeypatch):
+    # M1 settings: local LLM first, SQLite in ./data, daily cap of 100 LLM calls per trip.
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    s = Settings(_env_file=None)
+    assert s.database_url == "sqlite:///data/travelkaki.db"
+    assert s.extract_model == "ollama_chat/qwen3:4b-instruct"
+    assert s.extract_fallback_model is None
+    assert s.ollama_base_url == "http://host.docker.internal:11434"
+    assert s.llm_daily_cap == 100
+    assert s.nominatim_email is None
