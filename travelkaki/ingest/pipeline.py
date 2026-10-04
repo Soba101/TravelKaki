@@ -51,13 +51,16 @@ def _fail(deps: Deps, source_id: int, code: str) -> PipelineResult:
     return PipelineResult(error=code)
 
 
-async def _save(trip: Trip, ex: ExtractedPlace, source_id: int | None, deps: Deps) -> Place | str:
+async def _save(
+    trip: Trip, ex: ExtractedPlace, source_id: int | None, deps: Deps, geocode: bool = True
+) -> Place | str:
     """Geocode + dedupe + save one place (#12, #13).
 
     Returns the new Place, or the name of the saved place it was merged into.
+    geocode=False saves it without a pin (used for places beyond the card limit).
     """
     hit, confidence = None, Confidence.none
-    if deps.geo is not None:
+    if deps.geo is not None and geocode:
         center = (trip.city_lat, trip.city_lng) if trip.city_lat is not None else None
         hit, confidence = await deps.geo.locate(ex.name, trip.city, center)
     lat, lng, address = (hit.lat, hit.lng, hit.address) if hit else (None, None, None)
@@ -85,7 +88,9 @@ async def _save(trip: Trip, ex: ExtractedPlace, source_id: int | None, deps: Dep
 
 async def _save_all(trip, extracted, source_id, deps, result: PipelineResult) -> None:
     for ex in extracted:
-        saved = await _save(trip, ex, source_id, deps)
+        # Geocoding takes ~1 s per place (shared by every chat), so only pin the places
+        # that get a card. The rest are saved unpinned and listed in /places. (PR4 review)
+        saved = await _save(trip, ex, source_id, deps, geocode=len(result.places) < MAX_CARDS)
         if isinstance(saved, str):
             result.merged.append(saved)
         elif len(result.places) < MAX_CARDS:

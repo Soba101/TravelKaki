@@ -1,7 +1,8 @@
 """Spot the same place posted twice (issue #13).
 
-Same name (ignoring case, punctuation and extra spaces) within 100 m = same place.
-Two places without a map pin count as the same if their names match.
+Same name (ignoring case, punctuation and extra spaces) = same place, unless both
+have map pins more than 100 m apart (e.g. two branches of a chain).
+If either has no pin (geocoder miss, or "Wrong place" was tapped), the name decides.
 """
 
 import re
@@ -26,9 +27,6 @@ def find_duplicate(
         if normalise_name(place.name) != key:
             continue
         both_pinned = None not in (lat, lng, place.lat, place.lng)
-        both_unpinned = lat is None and place.lat is None
-        if both_unpinned or (
-            both_pinned and distance_m((lat, lng), (place.lat, place.lng)) <= SAME_PLACE_M
-        ):
+        if not both_pinned or distance_m((lat, lng), (place.lat, place.lng)) <= SAME_PLACE_M:
             return place
     return None

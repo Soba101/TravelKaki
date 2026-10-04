@@ -158,3 +158,25 @@ async def test_retry_reuses_the_saved_caption(sessions):
         )
     deps = make_deps(sessions, FakeLlm(places_answer("Ichiran")), fetch=caption_fetcher(text=None))
     assert (await pipeline.run(source.id, deps)).error is None
+
+
+async def test_only_card_places_are_geocoded(sessions):
+    # PR4 review: geocoding is ~1 s per place for everyone. Pin the 10 places that get
+    # cards; save the rest unpinned so a 30-place post doesn't take over a minute.
+    _, source = make_source(sessions)
+    geo = FakeGeo()
+    calls = []
+    real = geo.locate
+
+    async def counting(name, city, center):
+        calls.append(name)
+        return await real(name, city, center)
+
+    geo.locate = counting
+    deps = make_deps(sessions, FakeLlm(places_answer(*[f"P{i}" for i in range(12)])))
+    deps.geo = geo
+    result = await pipeline.run(source.id, deps)
+    assert len(calls) == 10 and len(result.places) == 10 and result.extra == 2
+    with sessions() as s:
+        unpinned = [p for p in s.query(Place).all() if p.lat is None]
+    assert len(unpinned) == 2

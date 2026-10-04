@@ -27,4 +27,7 @@ def test_find_duplicate():
     assert find_duplicate("Ichiran Shibuya", *far, saved) is None
     assert find_duplicate("Butagumi", *SHIBUYA, saved) is None
     assert find_duplicate("Ichiran", None, None, [_place("ICHIRAN")]) is not None  # both unpinned
-    assert find_duplicate("Ichiran Shibuya", None, None, saved) is None  # one pinned, one not
+    # One pinned, one not (e.g. after "Wrong place" or a geocoder hiccup): same name = same
+    # place, both ways round. (PR4 review)
+    assert find_duplicate("Ichiran Shibuya", None, None, saved) is saved[0]
+    assert find_duplicate("Ichiran", *SHIBUYA, [_place("ICHIRAN")]) is not None

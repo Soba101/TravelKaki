@@ -298,3 +298,15 @@ async def test_cards_fall_back_to_post_author(sessions, monkeypatch):
     ctx, _ = _ctx(sessions)
     await results.post_pipeline(ctx.bot, 1, None, source.id, None, "tiktok", make_deps(sessions))
     assert "from foodie's TikTok" in _sent(ctx)[0]
+
+
+async def test_announce_survives_a_chat_that_removed_the_bot(sessions):
+    # PR4 review asked: one bad chat must not stop the others (or the bot booting).
+    from telegram.error import Forbidden
+
+    deps = make_deps(sessions)
+    deps.interrupted = [(11, 1), (12, 2)]
+    ctx, _ = _ctx(sessions)
+    ctx.bot.send_message.side_effect = [Forbidden("bot was kicked"), None]
+    await results.announce_interrupted(ctx.bot, deps)  # must not raise
+    assert ctx.bot.send_message.await_count == 2
