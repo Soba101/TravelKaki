@@ -10,6 +10,7 @@
 import logging
 import re
 import uuid
+from html import escape
 
 from telegram import Update
 from telegram.error import TelegramError
@@ -81,11 +82,14 @@ async def run_plan(bot, chat_id: int, window: Window, deps, progress_id: int, pl
     """The background part: prepare -> agent -> save -> post. Always unlocks the chat."""
     run_id = str(uuid.uuid4())
 
-    async def progress(text: str) -> None:
+    async def progress(text: str, final: bool = False) -> None:
+        """Edit the progress message. For a final error, send a new message if that fails."""
         try:
             await bot.edit_message_text(text, chat_id, progress_id)
         except TelegramError as e:
             log.warning("progress edit failed chat=%s: %s", chat_id, e)
+            if final:  # e.g. someone deleted the progress message (PR2 review #3)
+                await send(bot, chat_id, escape(text))
 
     try:
         inp = await prepare(deps, chat_id, window, progress=progress)
@@ -96,8 +100,10 @@ async def run_plan(bot, chat_id: int, window: Window, deps, progress_id: int, pl
                 s, inp.trip_id, run_id, result.plan,
                 used_ai=result.used_ai, tradeoffs=result.tradeoffs, window=window.label(),
             )  # fmt: skip
-        for part in format_plan(inp, result, saved.version):
-            await send(bot, chat_id, part)
+        sent = [await send(bot, chat_id, part) for part in format_plan(inp, result, saved.version)]
+        if not all(sent):  # never silent: keep the progress message and say so (review #3)
+            await progress(FAILED, final=True)
+            return
         try:
             await bot.delete_message(chat_id, progress_id)
         except TelegramError:
@@ -105,9 +111,9 @@ async def run_plan(bot, chat_id: int, window: Window, deps, progress_id: int, pl
         log.info("plan chat=%s run=%s rounds=%s used_ai=%s", chat_id, run_id, result.rounds,
                  result.used_ai)  # fmt: skip
     except PlanError as e:
-        await progress(PLAN_ERRORS[e.code])
+        await progress(PLAN_ERRORS[e.code], final=True)
     except Exception:
         log.exception("plan failed chat=%s run=%s", chat_id, run_id)
-        await progress(FAILED)
+        await progress(FAILED, final=True)
     finally:
         planning.discard(chat_id)

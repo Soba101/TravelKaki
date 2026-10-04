@@ -147,3 +147,27 @@ def test_application_registers_plan():
     handlers = build_application("123:fake-token").handlers[0]
     assert any(isinstance(h, CommandHandler) and "plan" in h.commands for h in handlers)
     assert "plan" in [c.command for c in COMMANDS]
+
+
+async def test_failed_send_is_not_silent(sessions):
+    """PR2 review #3: if the plan can't be posted, the progress message says so."""
+    from telegram.error import TimedOut
+
+    _trip(sessions)
+    update, ctx, tasks = _ctx(sessions)
+    ctx.bot.send_message.side_effect = TimedOut()
+    await plan_command(update, ctx)
+    await tasks[0]
+    assert _edits(ctx)[-1] == "Planning failed, please try /plan again."
+    ctx.bot.delete_message.assert_not_awaited()
+
+
+async def test_failed_edit_falls_back_to_a_new_message(sessions):
+    """PR2 review #3: if the progress message is gone, the error is sent as a new message."""
+    from telegram.error import BadRequest
+
+    update, ctx, tasks = _ctx(sessions)  # no trip
+    ctx.bot.edit_message_text.side_effect = BadRequest("message to edit not found")
+    await plan_command(update, ctx)
+    await tasks[0]
+    assert "/newtrip" in _sent(ctx)[-1]

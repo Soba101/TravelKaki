@@ -72,3 +72,14 @@ def test_long_plan_is_split():
     days = [Day(TUE, [Stop(i, 600, 660, 5, "walk") for i in range(1, 40)]) for _ in range(14)]
     parts = format_plan(inp, _result(Plan(days)), version=1)
     assert len(parts) > 1 and all(len(p) <= 4096 for p in parts)
+
+
+def test_long_not_planned_list_is_shortened():
+    """PR2 review #4: hundreds of unpinned extras must not break the message."""
+    inp = make_input([place(1, hours="24/7")], days=1)
+    inp.dropped = [Dropped(100 + i, "Tom & Jerry's", "no map pin") for i in range(200)]
+    plan = Plan([Day(TUE, [Stop(1, 600, 720, 5, "walk")])])
+    parts = format_plan(inp, _result(plan), version=1)
+    text = "\n".join(parts)
+    assert "and 190 more" in text and all(len(p) <= 4096 for p in parts)
+    assert "Trade-offs" in text

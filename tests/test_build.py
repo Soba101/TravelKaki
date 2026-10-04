@@ -183,3 +183,21 @@ def test_restaurants_are_not_planned_for_breakfast():
     assert plan.days[0].stops[0].start >= 660
     cafe = build_days(make_input([place(2, category="cafe")], days=1))
     assert cafe.days[0].stops[0].start < 660
+
+
+def test_restaurant_near_hotel_does_not_delay_the_day():
+    """PR2 review #1: a ramen shop next to the hotel must not make the day start at 11:00."""
+    ramen = place(1, 35.6902, 139.7000, category="ramen", hours="24/7")
+    museum = place(2, 35.6960, 139.7000, hours="Mo-Su 09:30-17:00")
+    plan = build_days(make_input([ramen, museum], days=1))
+    starts = {s.place_id: s.start for s in plan.days[0].stops}
+    assert starts[2] < 660 and starts[1] >= 660
+
+
+def test_far_evening_place_does_not_take_over_the_day():
+    """PR2 review #8: a far bar must not push out Must-gos near the hotel."""
+    bar = place(9, 35.99, 139.70, category="bar", hours="Mo-Su 18:00-02:00")  # ~33 km
+    near = [place(1, 35.692, 139.70), place(2, 35.694, 139.70, category="park")]
+    plan = build_days(make_input(near + [bar], days=1))
+    planned = [s.place_id for s in plan.days[0].stops]
+    assert 1 in planned and 2 in planned

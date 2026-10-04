@@ -14,6 +14,7 @@ from travelkaki.planner.hours import parse
 MAX_CHARS = 4096  # Telegram's limit per message
 MAX_WAYPOINTS = 9  # Google Maps directions links allow 9 stops in between
 ICONS = {"walk": "🚶", "transit": "🚇", "express": "🚆"}
+MAX_LISTED = 10  # "Not planned" names shown; the rest are counted (PR2 review #4)
 EXPRESS_NOTE = "🚆 = express train, express bus or taxi. Check routes in Google Maps."
 
 
@@ -70,7 +71,9 @@ def _footer(inp, result) -> str:
         lines.append(f"Trade-offs: {escape(result.tradeoffs)}")
     dropped = inp.dropped + result.plan.dropped
     if dropped:
-        lines.append("Not planned: " + ", ".join(f"{escape(d.name)} ({d.reason})" for d in dropped))
+        shown = ", ".join(f"{escape(d.name)} ({d.reason})" for d in dropped[:MAX_LISTED])
+        more = len(dropped) - MAX_LISTED
+        lines.append("Not planned: " + shown + (f" … and {more} more" if more > 0 else ""))
     planned = [inp.place(s.place_id) for d in result.plan.days for s in d.stops]
     unknown = sum(1 for p in planned if p and parse(p.hours) is None)
     if unknown:

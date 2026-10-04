@@ -116,3 +116,41 @@ async def test_tool_call_written_as_text_is_used(sessions):
     deps, inp = _setup(sessions, llm)
     result = await run_planner(deps, inp, "run-1")
     assert result.used_ai and result.tradeoffs == "Fits well."
+
+
+async def test_calls_after_save_are_ignored(sessions):
+    """PR2 review #6: the posted plan is the one that was saved."""
+    llm = FakeToolLlm(GOOD_RUN[:3])
+    deps, inp = _setup(sessions, llm)
+    first_id = inp.places[0].id
+    save_then_change = (("save_plan", {"tradeoffs": "ok"}), ("build_days", {"exclude": [first_id]}))
+    llm.script.append(tool_reply(*save_then_change))
+    result = await run_planner(deps, inp, "run-1")
+    assert first_id in [s.place_id for d in result.plan.days for s in d.stops]
+
+
+async def test_qwen_tool_call_tags_are_read(sessions):
+    """PR2 review #11: qwen's own <tool_call> wrapper, with "parameters"."""
+    text = (
+        '<tool_call>\n{"name": "save_plan", "parameters": {"tradeoffs": "Tagged."}}\n</tool_call>'
+    )
+    llm = FakeToolLlm(GOOD_RUN[:3] + [tool_reply(text=text)])
+    deps, inp = _setup(sessions, llm)
+    result = await run_planner(deps, inp, "run-1")
+    assert result.used_ai and result.tradeoffs == "Tagged."
+
+
+async def test_slow_model_hits_the_overall_time_limit(sessions, monkeypatch):
+    """PR2 review #2: a hung or slow model falls back to code within a time limit."""
+    import asyncio
+
+    import travelkaki.planner.loop as loop_module
+
+    class SlowLlm:
+        async def chat_tools(self, messages, tools, on_call):
+            await asyncio.sleep(5)
+
+    monkeypatch.setattr(loop_module, "AGENT_TIMEOUT", 0.05)
+    deps, inp = _setup(sessions, SlowLlm())
+    result = await run_planner(deps, inp, "run-1")
+    assert not result.used_ai and result.plan == build_days(inp)

@@ -30,9 +30,14 @@ def day_label(d: date) -> str:
 
 
 def order(places: list[PlanPlace], base: tuple[float, float]) -> list[PlanPlace]:
-    """Nearest neighbour from the base. Far (day-trip) places first, evening places last."""
-    far = [p for p in places if estimate(base, p.point)[0] > MAX_TRANSFER]
-    late = [p for p in places if is_evening(p) and p not in far]
+    """Nearest neighbour from the base. Far (day-trip) places first, evening places last.
+
+    A far EVENING place is not a day trip start: it stays last (PR2 review #8).
+    A meal place doesn't open the day if something else can (PR2 review #1),
+    or the whole morning waits for 11:00.
+    """
+    late = [p for p in places if is_evening(p)]
+    far = [p for p in places if p not in late and estimate(base, p.point)[0] > MAX_TRANSFER]
     rest = [p for p in places if p not in far and p not in late]
     out, cur = [], base
     for group in (far, rest, late):
@@ -42,6 +47,11 @@ def order(places: list[PlanPlace], base: tuple[float, float]) -> list[PlanPlace]
             left.remove(nxt)
             out.append(nxt)
             cur = nxt.point
+    if out and is_meal(out[0].category):
+        first_other = next((p for p in out if not is_meal(p.category) and p not in late), None)
+        if first_other is not None:
+            out.remove(first_other)
+            out.insert(0, first_other)
     return out
 
 
