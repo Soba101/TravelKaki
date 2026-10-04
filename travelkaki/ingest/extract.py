@@ -27,10 +27,12 @@ class Extraction(BaseModel):
 
 SCHEMA = Extraction.model_json_schema()
 
-# Tested on qwen3:4b-instruct before M1 (3/3 places from a sample Tokyo caption).
+# Tested on qwen3:4b-instruct (tests/test_live.py). The "stall inside a market" line was
+# added after it missed a pepper-bun stall inside Raohe night market.
 SYSTEM = (
-    "Extract real, visitable places (restaurants, cafes, bars, shops, sights, markets, "
-    "viewpoints) from a travel video caption. The group's trip city is {city}. "
+    "Extract real, visitable places (restaurants, cafes, bars, food stalls, shops, sights, "
+    "markets, viewpoints) from a travel video caption. The group's trip city is {city}. "
+    "Include places mentioned inside other places, e.g. a stall inside a market. "
     "Return only places actually named in the text; never invent places. "
     "No places named -> return an empty list. "
     "video_note = what the caption says about the place, max 15 words."
