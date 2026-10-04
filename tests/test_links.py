@@ -250,3 +250,28 @@ async def test_post_pipeline_error_has_retry(sessions, monkeypatch):
     assert call.kwargs["reply_markup"].inline_keyboard[0][0].callback_data == f"r:{source.id}"
     with sessions() as s:
         assert queries.get_trip(s, 1) is not None
+
+
+def test_link_broken_by_a_line_break_is_repaired():
+    # Real bug from the PR3 demo: a pasted link arrived as
+    # "https://www.tiktok.com/\n@locavore.eats/video/..." and Telegram marked only
+    # "https://www.tiktok.com/" as the link (the rest as an @mention).
+    text = "https://www.tiktok.com/\n@locavore.eats/video/7501192190400482581"
+    msg = _message(
+        text,
+        [
+            MessageEntity(type="url", offset=0, length=23),
+            MessageEntity(type="mention", offset=24, length=9),
+        ],
+    )
+    assert links.find_links(msg) == [
+        "https://www.tiktok.com/@locavore.eats/video/7501192190400482581"
+    ]
+
+
+async def test_unreadable_tiktok_link_is_never_silent(sessions):
+    # A TikTok/IG link we can't read as a post must get a reply, not silence.
+    make_source(sessions)
+    ctx, tasks = _ctx(sessions)
+    await links.on_message(_update(_url_message("https://www.tiktok.com/@a.b")), ctx)
+    assert "one line" in _sent(ctx)[0] and tasks == []

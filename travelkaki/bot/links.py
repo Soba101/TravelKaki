@@ -17,13 +17,24 @@ from travelkaki.bot.cards import NO_TRIP, error_text
 from travelkaki.bot.results import post_pipeline, post_text_add, send
 from travelkaki.db import queries
 from travelkaki.db.models import SourceStatus
-from travelkaki.ingest.urls import LinkError, canonical, needs_redirect, normalise
+from travelkaki.ingest.urls import (
+    LinkError,
+    canonical,
+    is_platform_host,
+    needs_redirect,
+    normalise,
+)
 
 log = logging.getLogger(__name__)
 
 MAX_LINKS = 5  # per message
 ADD_USAGE = "Use /add &lt;TikTok or IG link&gt; or /add &lt;place name&gt;"
 _URL_TYPES = [MessageEntity.URL, MessageEntity.TEXT_LINK]
+INCOMPLETE = "That TikTok/IG link doesn't look like a post. Paste the full link on one line."
+# A pasted link can arrive split by a line break: "https://www.tiktok.com/\n@user/video/1".
+# Telegram then marks only the first line as the link. We glue the two parts back.
+# (Found in the PR3 demo.)
+_BROKEN = re.compile(r"(https?://(?:www\.|m\.)?(?:tiktok|instagram)\.com/)[ \t]*\n\s*(\S+)", re.I)
 
 
 def find_links(message) -> list[str]:
@@ -33,7 +44,10 @@ def find_links(message) -> list[str]:
     else:
         entities = message.parse_caption_entities(_URL_TYPES)
     found = [e.url if e.type == MessageEntity.TEXT_LINK else text for e, text in entities.items()]
-    return found[:MAX_LINKS]
+    repaired = [m[1] + m[2] for m in _BROKEN.finditer(message.text or message.caption or "")]
+    # Drop the half links that the repaired ones replace.
+    found = [link for link in found if not any(r.startswith(link) for r in repaired)]
+    return (found + repaired)[:MAX_LINKS]
 
 
 def parse_mention_add(text: str, bot_username: str) -> str | None:
@@ -59,7 +73,9 @@ async def handle_link(url: str, update: Update, context: ContextTypes.DEFAULT_TY
         )
         return True
     if found is None:
-        return True  # not a TikTok/IG post: ignore quietly
+        if is_platform_host(url):  # a TikTok/IG link we can't read: never stay silent
+            await send(context.bot, chat_id, INCOMPLETE, message.message_id)
+        return True  # other sites: ignore quietly
     canonical_url, platform = found
     with deps.sessions() as s:
         trip = queries.get_trip(s, chat_id)
