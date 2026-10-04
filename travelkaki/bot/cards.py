@@ -1,4 +1,4 @@
-"""Text and buttons the bot sends: place cards, /places list, error messages.
+"""Text and buttons the bot sends: the place list per link, /places, error messages.
 
 All messages use Telegram's HTML mode. Every user-supplied string (place
 names, notes, addresses, names of people) goes through html.escape, because
@@ -42,35 +42,55 @@ def maps_url(place: Place, city: str) -> str:
     return f"https://www.google.com/maps/search/?api=1&query={query}"
 
 
-def card_text(place: Place, city: str, poster: str | None, platform: str | None) -> str:
-    """The card for one place. `poster` = who posted the link (None for text adds)."""
-    lines = [f"📍 <b>{escape(place.name)}</b> · {escape(place.category)}"]
-    if place.video_note:
-        lines.append(f"“{escape(place.video_note)}”")
-    link = f'<a href="{escape(maps_url(place, city))}">Map ↗</a>'
+def _unsure(place: Place) -> bool:
+    return place.confidence in (Confidence.low, Confidence.far)
+
+
+def list_text(
+    places: list[Place],
+    city: str,
+    poster: str | None,
+    platform: str | None,
+    merged: list[str] | tuple = (),
+    extra: int = 0,
+) -> str:
+    """ONE compact message for everything found in a link (#49).
+
+    Was one card per place, which flooded the group chat (M1 demo feedback).
+    Each place is a numbered line; ⚠️ marks a pin we're unsure about.
+    """
+    count = f"{len(places)} place{'s' if len(places) != 1 else ''}"
     if platform:
-        source = f"{escape(poster)}'s " if poster else "a "
-        lines.append(f"from {source}{PLATFORM_NAMES.get(platform, platform)} · {link}")
+        who = f"{escape(poster)}'s" if poster else ("an" if platform == "instagram" else "a")
+        lines = [f"📍 {count} from {who} {PLATFORM_NAMES.get(platform, platform)}"]
     else:
-        lines.append(link)
-    if place.confidence == Confidence.low:
-        lines.append(f"Is this right? {escape(place.address or '')}")
-    elif place.confidence == Confidence.far:
-        lines.append(f"⚠️ Not near {escape(city)}")
+        lines = [f"📍 Added: {count}"]  # text add ("@bot add ...")
+    for i, place in enumerate(places, start=1):
+        link = f'<a href="{escape(maps_url(place, city))}">Map</a>'
+        line = f"{i}. <b>{escape(place.name)}</b> · {escape(place.category)} · {link}"
+        lines.append(line + (" ⚠️" if _unsure(place) else ""))
+    if merged or extra:
+        lines.append("")
+    if merged:
+        lines.append("Already saved: " + ", ".join(escape(n) for n in merged))
+    if extra:
+        lines.append(f"+{extra} more, see /places")
     return "\n".join(lines)
 
 
-def card_keyboard(place: Place, counts: VoteCounts) -> InlineKeyboardMarkup:
-    """Vote row, plus a 'Wrong place' row when we're unsure of the pin."""
-    rows = [
-        [
-            InlineKeyboardButton(f"✅ Must {counts.must}", callback_data=f"v:{place.id}:m"),
-            InlineKeyboardButton(f"🤔 Maybe {counts.maybe}", callback_data=f"v:{place.id}:y"),
-            InlineKeyboardButton(f"❌ Skip {counts.skip}", callback_data=f"v:{place.id}:s"),
+def list_keyboard(places: list[Place], counts: dict[int, VoteCounts]) -> InlineKeyboardMarkup:
+    """One button row per place, numbered like the list. Unsure pins get a 👎📍 button."""
+    rows = []
+    for i, place in enumerate(places, start=1):
+        c = counts.get(place.id, VoteCounts())
+        row = [
+            InlineKeyboardButton(f"{i} ✅{c.must}", callback_data=f"v:{place.id}:m"),
+            InlineKeyboardButton(f"🤔{c.maybe}", callback_data=f"v:{place.id}:y"),
+            InlineKeyboardButton(f"❌{c.skip}", callback_data=f"v:{place.id}:s"),
         ]
-    ]
-    if place.confidence in (Confidence.low, Confidence.far):
-        rows.append([InlineKeyboardButton("👎 Wrong place", callback_data=f"w:{place.id}")])
+        if _unsure(place):
+            row.append(InlineKeyboardButton("👎📍", callback_data=f"w:{place.id}"))
+        rows.append(row)
     return InlineKeyboardMarkup(rows)
 
 

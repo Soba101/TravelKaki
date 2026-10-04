@@ -2,9 +2,9 @@
 
 from travelkaki.bot.cards import (
     ERRORS,
-    card_keyboard,
-    card_text,
     error_text,
+    list_keyboard,
+    list_text,
     maps_url,
     parse_callback,
     places_text,
@@ -26,41 +26,50 @@ def _buttons(markup):
     return [[(b.text, b.callback_data) for b in row] for row in markup.inline_keyboard]
 
 
-def test_card_escapes_html():
+def test_list_escapes_html():
     # Review Focus 3: names come from untrusted captions.
-    text = card_text(_place(name="Bar <Ishi> & *Co*"), "Tokyo", "Alex", "tiktok")
+    text = list_text([_place(name="Bar <Ishi> & *Co*")], "Tokyo", "Alex", "tiktok")
     assert "Bar &lt;Ishi&gt; &amp; *Co*" in text
     assert "<Ishi>" not in text
 
 
-def test_card_text_lines():
-    text = card_text(_place(), "Tokyo", "Alex", "tiktok")
-    assert text.startswith("📍 <b>Ichiran</b> · ramen")
-    assert "“24h, solo booths”" in text
-    assert "from Alex's TikTok" in text and "Map ↗</a>" in text
+def test_list_text_is_one_compact_message():
+    # One message per link instead of one card per place (#49).
+    places = [_place(1, "Ichiran"), _place(2, "Butagumi", category="tonkatsu")]
+    text = list_text(places, "Tokyo", "Alex", "tiktok", merged=["Tsukiji Market"], extra=3)
+    lines = text.split("\n")
+    assert lines[0] == "📍 2 places from Alex's TikTok"
+    assert lines[1].startswith("1. <b>Ichiran</b> · ramen · <a href=")
+    assert lines[2].startswith("2. <b>Butagumi</b> · tonkatsu")
+    assert "Already saved: Tsukiji Market" in text
+    assert "+3 more, see /places" in text
 
 
-def test_text_add_card_has_only_map_link():
-    text = card_text(_place(video_note=""), "Tokyo", None, None)
-    assert "from" not in text and "Map ↗" in text
+def test_list_text_headers():
+    assert list_text([_place()], "Tokyo", None, None).startswith("📍 Added: ")  # text add
+    assert list_text([_place()], "Tokyo", None, "instagram").startswith(
+        "📍 1 place from an Instagram"
+    )
 
 
-def test_low_and_far_cards_ask_and_offer_wrong_place():
-    low = _place(confidence="low", lat=35.6, lng=139.7, address="1-2 Shibuya")
-    assert "Is this right? 1-2 Shibuya" in card_text(low, "Tokyo", None, None)
-    assert len(_buttons(card_keyboard(low, VoteCounts()))) == 2
-    far = _place(confidence="far", lat=34.7, lng=135.5)
-    assert "⚠️ Not near Tokyo" in card_text(far, "Tokyo", None, None)
-    high = _place(confidence="high", lat=35.6, lng=139.7)
-    assert len(_buttons(card_keyboard(high, VoteCounts()))) == 1
+def test_unsure_pins_are_marked():
+    low = _place(1, confidence="low", lat=35.6, lng=139.7, address="1-2 Shibuya")
+    far = _place(2, confidence="far", lat=34.7, lng=135.5)
+    high = _place(3, confidence="high", lat=35.6, lng=139.7)
+    lines = list_text([low, far, high], "Tokyo", "Alex", "tiktok").split("\n")
+    assert lines[1].endswith("⚠️") and lines[2].endswith("⚠️") and not lines[3].endswith("⚠️")
 
 
-def test_vote_buttons_show_counts_and_fit_telegram_limit():
-    rows = _buttons(card_keyboard(_place(id=10**9), VoteCounts(2, 0, 1)))
-    assert rows[0] == [
-        ("✅ Must 2", f"v:{10**9}:m"),
-        ("🤔 Maybe 0", f"v:{10**9}:y"),
-        ("❌ Skip 1", f"v:{10**9}:s"),
+def test_list_keyboard_one_row_per_place():
+    big = 10**9
+    low = _place(big, confidence="low", lat=35.6, lng=139.7)
+    rows = _buttons(list_keyboard([_place(5), low], {5: VoteCounts(2, 0, 1)}))
+    assert rows[0] == [("1 ✅2", "v:5:m"), ("🤔0", "v:5:y"), ("❌1", "v:5:s")]
+    assert rows[1] == [  # unsure pin: extra "wrong place" button; missing counts = 0
+        ("2 ✅0", f"v:{big}:m"),
+        ("🤔0", f"v:{big}:y"),
+        ("❌0", f"v:{big}:s"),
+        ("👎📍", f"w:{big}"),
     ]
     assert all(len(data.encode()) <= 64 for row in rows for _, data in row)
     assert _buttons(retry_keyboard(5)) == [[("🔁 Retry", "r:5")]]

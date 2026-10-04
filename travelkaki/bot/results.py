@@ -11,9 +11,8 @@ from html import escape
 from telegram import LinkPreviewOptions, ReplyParameters
 from telegram.error import RetryAfter, TelegramError
 
-from travelkaki.bot.cards import card_keyboard, card_text, error_text, retry_keyboard
+from travelkaki.bot.cards import error_text, list_keyboard, list_text, retry_keyboard
 from travelkaki.db import queries
-from travelkaki.db.place_queries import VoteCounts
 from travelkaki.deps import Deps
 from travelkaki.ingest import pipeline
 from travelkaki.ingest.pipeline import PipelineResult
@@ -69,13 +68,12 @@ async def _post(bot, chat_id, reply_to, result: PipelineResult, poster, platform
     with deps.sessions() as s:
         city = queries.get_trip(s, chat_id).city
     poster = poster or result.author  # after a Retry we don't know who posted: credit the creator
-    for place in result.places:
-        text = card_text(place, city, poster, platform)
-        await send(bot, chat_id, text, reply_to, card_keyboard(place, VoteCounts()))
-    for name in result.merged:
-        await send(bot, chat_id, f"{escape(name)} already saved (+1 link)", reply_to)
-    if result.extra:
-        await send(bot, chat_id, f"+{result.extra} more, see /places", reply_to)
+    if result.places:  # ONE message per link, a vote row per place (#49)
+        text = list_text(result.places, city, poster, platform, result.merged, result.extra)
+        await send(bot, chat_id, text, reply_to, list_keyboard(result.places, {}))
+    elif result.merged:  # everything was already saved
+        names = ", ".join(escape(n) for n in result.merged)
+        await send(bot, chat_id, f"Already saved: {names} (+1 link)", reply_to)
 
 
 async def announce_interrupted(bot, deps: Deps) -> None:
