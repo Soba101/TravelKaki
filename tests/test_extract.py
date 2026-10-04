@@ -78,3 +78,11 @@ async def test_untrusted_caption_output_is_capped():
     places = await extract_places(FakeLlm({"places": many}), "Tokyo", "caption", Mock())
     assert len(places) == 30
     assert all(len(p.name) <= 100 and len(p.category) <= 100 for p in places)
+
+
+def test_schema_asks_the_model_for_every_field():
+    # Defaults keep parsing lenient, but the schema sent to the LLM must still
+    # require every field, or the model leaves them out. (Found in the PR3 dry run:
+    # every card said "place".)
+    required = SCHEMA["$defs"]["ExtractedPlace"]["required"]
+    assert set(required) == {"name", "category", "city", "video_note"}
