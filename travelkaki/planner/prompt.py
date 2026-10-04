@@ -26,7 +26,8 @@ Rules:
 - Never include places voted Skip (they are not in the list).
 - Must-go places matter most. Maybe places only if there is time.
 - If two Must-go places compete and no plan fits both, you may ask the group
-  with ask_group (if you have it). Ask at most twice.
+  with ask_group (if you have it). Ask at most twice. Then call build_days again
+  with the group's choice (exclude the place that lost), validate and save.
 - You have at most 8 rounds. Always finish with save_plan, as a real tool call."""
 
 

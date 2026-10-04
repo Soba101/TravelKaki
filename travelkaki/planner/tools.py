@@ -111,6 +111,15 @@ def _build(st: ToolState, args: dict) -> str:
     return plan_summary(st.draft, st.inp)
 
 
+def _hint(st: ToolState, d) -> str:
+    """The one next step that can help a left-out Must-go (live runs: small models need it)."""
+    if "closed on" in d.reason and len(st.inp.dates) > 1:
+        return " - pin it to another day, or accept it"
+    if st.ask is not None and st.polls < MAX_POLLS:  # it lost its slot to other Must-gos
+        return " - it competes with other Must-gos: you may ask_group which one to keep"
+    return ""
+
+
 def _validate(st: ToolState, args: dict) -> str:
     if st.draft is None:
         raise ToolError("call build_days first")
@@ -123,8 +132,7 @@ def _validate(st: ToolState, args: dict) -> str:
     for i in st.issues:
         if i.code == "missing_must" and i.place_id in dropped:
             d = dropped[i.place_id]
-            hint = " - pin it to another day, or accept it" if "closed" in d.reason else ""
-            lines.append(f"left out: {d.name} ({d.reason}){hint}")
+            lines.append(f"left out: {d.name} ({d.reason}){_hint(st, d)}")
         else:
             lines.append(f"{i.level} {i.code}: {i.text}")
     if savable(st.draft, st.issues):
