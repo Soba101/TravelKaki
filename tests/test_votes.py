@@ -96,3 +96,30 @@ async def test_places_without_trip(sessions):
     )
     await votes.places_command(update, ctx)
     assert "/newtrip" in ctx.bot.send_message.await_args.args[1]
+
+
+async def test_wrong_place_clears_the_pin(sessions):
+    trip, _ = make_source(sessions)
+    with sessions() as s:
+        place = pq.add_place(
+            s,
+            trip.id,
+            name="Ichiran",
+            category="ramen",
+            video_note="",
+            lat=35.6,
+            lng=139.7,
+            address="x",
+            confidence="low",
+        )
+    ctx, _ = _ctx(sessions)
+    q = _query(f"w:{place.id}")
+    await votes.on_callback(SimpleNamespace(callback_query=q, effective_chat=q.message.chat), ctx)
+    q.answer.assert_awaited_once_with("Pin removed")
+    with sessions() as s:
+        saved = pq.get_place(s, place.id)
+    assert (saved.lat, saved.lng, saved.confidence) == (None, None, "none")
+    text = q.edit_message_text.await_args.args[0]
+    assert text.endswith("❌ Pin removed")
+    markup = q.edit_message_text.await_args.kwargs["reply_markup"]
+    assert len(markup.inline_keyboard) == 1  # only the vote row is left

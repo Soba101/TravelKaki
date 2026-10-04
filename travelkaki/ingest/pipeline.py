@@ -2,8 +2,9 @@
 
 Fixed steps, not an agent:
     caption -> LLM extract -> save places
+    ... then each place: geocode -> dedupe -> save
 (Normalising the URL happens earlier, in the bot, because the duplicate check
-needs the canonical URL. Geocoding and dedupe are added in PR4.)
+needs the canonical URL.)
 
 Every outside call comes from `deps`, so tests run with fakes.
 Every failure sets the link to "failed" with an error code; the bot turns the
@@ -15,8 +16,9 @@ from dataclasses import dataclass, field
 
 from travelkaki.db import place_queries as pq
 from travelkaki.db import queries
-from travelkaki.db.models import Place, SourceStatus, Trip
+from travelkaki.db.models import Confidence, Place, SourceStatus, Trip
 from travelkaki.deps import Deps
+from travelkaki.ingest.dedupe import find_duplicate
 from travelkaki.ingest.extract import ExtractedPlace, extract_places
 from travelkaki.llm.cap import CapReached, make_counter
 from travelkaki.llm.client import LlmUnavailable
@@ -49,10 +51,31 @@ def _fail(deps: Deps, source_id: int, code: str) -> PipelineResult:
 
 
 async def _save(trip: Trip, ex: ExtractedPlace, source_id: int | None, deps: Deps) -> Place | str:
-    """Save one place. Returns the new Place (or, from PR4, the name it merged into)."""
+    """Geocode + dedupe + save one place (#12, #13).
+
+    Returns the new Place, or the name of the saved place it was merged into.
+    """
+    hit, confidence = None, Confidence.none
+    if deps.geo is not None:
+        center = (trip.city_lat, trip.city_lng) if trip.city_lat is not None else None
+        hit, confidence = await deps.geo.locate(ex.name, trip.city, center)
+    lat, lng, address = (hit.lat, hit.lng, hit.address) if hit else (None, None, None)
     with deps.sessions() as s:
+        same = find_duplicate(ex.name, lat, lng, pq.trip_places(s, trip.id))
+        if same is not None:  # already saved: just remember this post mentions it too
+            if source_id is not None:
+                pq.link_source(s, same.id, source_id)
+            return same.name
         place = pq.add_place(
-            s, trip.id, name=ex.name, category=ex.category or "place", video_note=ex.video_note
+            s,
+            trip.id,
+            name=ex.name,
+            category=ex.category or "place",
+            video_note=ex.video_note,
+            lat=lat,
+            lng=lng,
+            address=address,
+            confidence=confidence,
         )
         if source_id is not None:
             pq.link_source(s, place.id, source_id)
