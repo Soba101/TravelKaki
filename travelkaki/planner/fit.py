@@ -96,3 +96,9 @@ def fit_day(
         stops.append(Stop(p.id, arrive, end, travel, mode))
         t, cur = end, p.point
     return Day(d, stops), dropped
+
+
+def hhmm(minutes: int) -> str:
+    """570 -> '09:30'. Past midnight wraps: 1470 -> '00:30'."""
+    minutes %= 1440
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
