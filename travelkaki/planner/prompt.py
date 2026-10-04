@@ -78,3 +78,14 @@ def plan_summary(plan: Plan, inp: PlanInput) -> str:
     if plan.dropped:
         lines.append("Dropped: " + "; ".join(f"{d.name} ({d.reason})" for d in plan.dropped))
     return "\n".join(lines)
+
+
+def left_out_hint(reason: str, n_days: int, can_ask: bool) -> str:
+    """The one next step that can help a left-out Must-go (small models need it; live runs)."""
+    if reason.startswith("closed on") and n_days > 1:
+        return " - pin it to another day, or accept it"
+    # Only when it lost its slot to other Must-gos: a vote can't fix "too far",
+    # "closed", or a place the group already voted out. (PR3 review #3)
+    if can_ask and reason.startswith(("no time left", "closed whenever")):
+        return " - it competes with other Must-gos: you may ask_group which one to keep"
+    return ""

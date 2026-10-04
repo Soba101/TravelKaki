@@ -11,6 +11,9 @@ counts change. on_poll() checks the total and wakes up the waiting planner.
 """
 
 import asyncio
+import logging
+
+log = logging.getLogger(__name__)
 
 POLL_WAIT = 300  # seconds
 NO_PREFERENCE = "No preference"
@@ -40,14 +43,20 @@ async def ask_group(
     poll_id = message.poll.id
     done = asyncio.Event()
     waiters[poll_id] = (target, done)  # on_poll() finds us here
+    poll = None
     try:
         await asyncio.wait_for(done.wait(), timeout)
     except TimeoutError:
         pass  # 5 minutes passed: use the votes we have
     finally:
         waiters.pop(poll_id, None)
-    poll = await bot.stop_poll(chat_id, message.message_id)
-    return {option.text: option.voter_count for option in poll.options}
+        # Always close the poll, even if the run was cancelled, so the group isn't
+        # left voting on a question nobody reads. (PR3 review #1)
+        try:
+            poll = await asyncio.shield(bot.stop_poll(chat_id, message.message_id))
+        except Exception as e:  # noqa: BLE001 - e.g. someone deleted the poll message
+            log.warning("stop_poll failed chat=%s: %s", chat_id, type(e).__name__)
+    return {o.text: o.voter_count for o in poll.options} if poll is not None else {}
 
 
 async def on_poll(update, context) -> None:
@@ -58,4 +67,10 @@ async def on_poll(update, context) -> None:
         return  # not one of our open polls
     target, done = waiter
     if poll.total_voter_count >= target:
+        done.set()
+
+
+def release_all(waiters: dict) -> None:
+    """End every open poll wait now (used on shutdown, so polls get stopped). (PR3 review #4)"""
+    for _, done in list(waiters.values()):
         done.set()

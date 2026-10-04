@@ -107,3 +107,42 @@ def test_application_registers_poll_handler():
 
     handlers = build_application("123:fake-token").handlers[0]
     assert any(isinstance(h, PollHandler) for h in handlers)
+
+
+async def test_cancelled_wait_still_stops_the_poll():
+    """PR3 review #1: if the run is cancelled mid-wait, the poll is closed, not left open."""
+    bot, waiters = _bot(), {}
+    task = asyncio.create_task(ask_group(bot, 1, "Which?", ["A", "B"], 5, waiters, timeout=10))
+    await asyncio.sleep(0)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    bot.stop_poll.assert_awaited_once_with(1, 5)
+    assert waiters == {}
+
+
+async def test_release_all_ends_open_waits():
+    """PR3 review #4: on shutdown every open poll wait ends (then the poll is stopped)."""
+    from travelkaki.planner.ask import release_all
+
+    bot, waiters = _bot(), {}
+    task = asyncio.create_task(ask_group(bot, 1, "Which?", ["A", "B"], 5, waiters, timeout=10))
+    await asyncio.sleep(0)
+    release_all(waiters)
+    await asyncio.wait_for(task, 1)
+    bot.stop_poll.assert_awaited_once()
+
+
+def test_ask_hint_only_for_real_clashes():
+    """PR3 review #3: no poll hint for far places or places the group already voted out."""
+    from travelkaki.planner.prompt import left_out_hint
+
+    assert "ask_group" in left_out_hint("no time left on Day 1", 1, can_ask=True)
+    assert "ask_group" in left_out_hint("closed whenever it would fit on Day 1", 1, can_ask=True)
+    assert left_out_hint("no time left on Day 1", 1, can_ask=False) == ""
+    for reason in ("left out by the planner", "too far for a day trip",
+                   "over 60 min from the other stops", "closed on Tue 15 Dec"):  # fmt: skip
+        assert left_out_hint(reason, 1, can_ask=True) == ""
+    assert "another day" in left_out_hint("closed on Tue 15 Dec", 2, can_ask=True)

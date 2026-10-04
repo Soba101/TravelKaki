@@ -25,6 +25,7 @@ def test_startup_survives_command_menu_error(monkeypatch):
         shutdown=AsyncMock(),
         updater=SimpleNamespace(start_polling=AsyncMock(), stop=AsyncMock()),
         bot=SimpleNamespace(username="travelkakiibot", send_message=AsyncMock()),
+        bot_data={},  # like a real Application (M2: open polls live here)
     )
     monkeypatch.setattr(web, "build_application", lambda token, deps: fake_bot)
     monkeypatch.setattr(web, "register_commands", AsyncMock(side_effect=NetworkError("down")))

@@ -53,10 +53,9 @@ def build_application(token: str, deps: Deps | None = None) -> Application:
     app.add_handler(CommandHandler("add", add_command, filters=NEW_ONLY))
     app.add_handler(CommandHandler("places", places_command, filters=NEW_ONLY))
     app.add_handler(CommandHandler("plan", plan_command, filters=NEW_ONLY))  # M2 planner
-    app.add_handler(CallbackQueryHandler(on_callback))
-    app.add_handler(
-        PollHandler(on_poll)
-    )  # M2: poll counts, so ask_group can close early  # vote / wrong place / retry buttons
+    app.add_handler(CallbackQueryHandler(on_callback))  # vote / wrong place / retry buttons
+    # M2: poll counts arrive here, so ask_group can close a poll early.
+    app.add_handler(PollHandler(on_poll))
     app.add_error_handler(on_error)  # never silent, even when a handler crashes
     # Every other new message with text or a caption (photos/videos with links too).
     # UpdateType.MESSAGE = new messages only: an edit must not read a link twice.

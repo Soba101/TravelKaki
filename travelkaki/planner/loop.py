@@ -13,23 +13,24 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass
 
 from travelkaki.db import plan_queries as plq
 from travelkaki.llm.cap import CapReached, make_counter
 from travelkaki.llm.client import LlmUnavailable, ToolCall
-from travelkaki.planner.ask import POLL_WAIT
 from travelkaki.planner.build import build_days
 from travelkaki.planner.fit import day_label
 from travelkaki.planner.prompt import ASK_TOOL, SYSTEM_PROMPT, TOOLS
-from travelkaki.planner.tools import MAX_POLLS, ToolState, run_tool
+from travelkaki.planner.tools import ToolState, run_tool
 from travelkaki.planner.types import Issue, Plan, PlanInput
 from travelkaki.planner.validate import validate
 
 log = logging.getLogger(__name__)
 
 MAX_ROUNDS = 8
-AGENT_TIMEOUT = 240  # seconds for the whole agent run; then the code-only plan (review #2)
+AGENT_TIMEOUT = 240  # seconds of LLM time per run; then the code-only plan (PR2 review #2)
+# Poll waits don't count: the clock pauses while the group votes (PR3 review #2).
 NUDGE = "Use the tools. Finish with save_plan."
 
 
@@ -40,11 +41,6 @@ class PlanResult:
     used_ai: bool  # False = the code-only fallback made this plan
     tradeoffs: str  # the agent's short summary ("" without AI)
     rounds: int  # LLM rounds used
-
-
-def time_limit(ask) -> float:
-    """Seconds for the whole agent run. Poll waits (up to 2 x 5 min) come on top."""
-    return AGENT_TIMEOUT + (MAX_POLLS * POLL_WAIT if ask is not None else 0)
 
 
 def _text_call(content: str | None) -> ToolCall | None:
@@ -85,22 +81,25 @@ def _first_message(inp: PlanInput) -> str:
     return f"Plan this trip: {inp.city}, {len(inp.dates)} days ({first} to {last})."
 
 
-async def _agent(deps, inp: PlanInput, st: ToolState, trace: _Tracer, tools: list, used: list):
-    """Run LLM rounds until save_plan or a limit. Counts rounds in used[0]."""
+async def _agent(deps, inp: PlanInput, st: ToolState, trace: _Tracer, tools: list) -> int:
+    """Run LLM rounds until save_plan or a limit. Returns rounds used."""
     on_call = make_counter(deps.sessions, inp.trip_id, deps.daily_cap)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": _first_message(inp)},
     ]
-    rounds = 0
+    rounds, started = 0, time.monotonic()
     while rounds < MAX_ROUNDS and not st.saved:
+        # LLM time only: the clock pauses while the group answers a poll.
+        llm_seconds = time.monotonic() - started - st.poll_seconds
         try:
-            reply = await deps.llm.chat_tools(messages, tools, on_call)
-        except (LlmUnavailable, CapReached) as e:
+            reply = await asyncio.wait_for(
+                deps.llm.chat_tools(messages, tools, on_call), AGENT_TIMEOUT - llm_seconds
+            )
+        except (LlmUnavailable, CapReached, TimeoutError) as e:
             log.warning("planner LLM stopped: %s", type(e).__name__)
             break
         rounds += 1
-        used[0] = rounds
         calls = [f"{c.name}({c.arguments})" for c in reply.tool_calls]
         trace("llm", None, f"round {rounds}", reply.content or "; ".join(calls), reply.tokens)
         messages.append(reply.message)
@@ -122,6 +121,7 @@ async def _agent(deps, inp: PlanInput, st: ToolState, trace: _Tracer, tools: lis
             messages.append(
                 {"role": "tool", "tool_call_id": call.id, "name": call.name, "content": out}
             )
+    return rounds
 
 
 async def run_planner(deps, inp: PlanInput, run_id: str, ask=None) -> PlanResult:
@@ -129,13 +129,7 @@ async def run_planner(deps, inp: PlanInput, run_id: str, ask=None) -> PlanResult
     st = ToolState(inp, ask=ask)
     tools = TOOLS + ([ASK_TOOL] if ask is not None else [])
     trace = _Tracer(deps, inp.trip_id, run_id)
-    used = [0]  # rounds, counted inside _agent (still known after a timeout)
-    if deps.llm is not None:
-        try:
-            await asyncio.wait_for(_agent(deps, inp, st, trace, tools, used), time_limit(ask))
-        except TimeoutError:
-            log.warning("planner agent timed out after %ss", time_limit(ask))
-    rounds = used[0]
+    rounds = await _agent(deps, inp, st, trace, tools) if deps.llm is not None else 0
     if st.saved:
         plan, used_ai, tradeoffs = st.draft, True, st.tradeoffs
     else:

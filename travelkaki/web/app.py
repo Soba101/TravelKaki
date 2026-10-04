@@ -16,6 +16,7 @@ from travelkaki.bot.app import build_application, register_commands
 from travelkaki.bot.results import announce_interrupted
 from travelkaki.config import get_settings
 from travelkaki.deps import build_deps, close_deps
+from travelkaki.planner.ask import release_all
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +53,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         try:
             yield  # the app serves requests while we're paused here
         finally:
-            # Shut down in reverse order.
+            # Shut down in reverse order. First end any /plan poll waits, so their
+            # polls get stopped instead of left open in the chat (M2, PR3 review #4).
+            release_all(bot.bot_data.get("polls", {}))
             await bot.updater.stop()
             await bot.stop()
             await bot.shutdown()
