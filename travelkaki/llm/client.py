@@ -11,6 +11,7 @@ raise CapReached, which stops everything at once.
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Callable
 
 from travelkaki.config import Settings
@@ -19,6 +20,7 @@ log = logging.getLogger(__name__)
 
 BACKOFF = [1, 3]  # seconds to wait before the 2nd and 3rd try
 TIMEOUT = 60  # seconds. The first local call also loads the model, so be generous.
+MAX_TOKENS = 1500  # stops a runaway model; a normal answer is a few hundred tokens
 
 
 class LlmUnavailable(Exception):
@@ -29,6 +31,9 @@ class LlmClient:
     def __init__(self, settings: Settings, completion=None, sleep=asyncio.sleep):
         # `completion` and `sleep` can be swapped for fakes in tests.
         if completion is None:
+            # Without this, LiteLLM downloads a model price list from the internet
+            # when imported. We don't need it, and CI must not use the network. (PR2 review)
+            os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
             import litellm  # imported here: it's slow to import and tests don't need it
 
             completion = litellm.acompletion
@@ -50,9 +55,18 @@ class LlmClient:
         return {"api_key": self._settings.llm_api_key}
 
     async def extract_json(
-        self, messages: list[dict], schema: dict, on_call: Callable[[], None]
-    ) -> dict:
-        """Ask for an answer that follows `schema`, and return it as a dict."""
+        self,
+        messages: list[dict],
+        schema: dict,
+        on_call: Callable[[], None],
+        validate: Callable[[dict], object] | None = None,
+    ):
+        """Ask for an answer that follows `schema`.
+
+        Returns the parsed JSON dict, or `validate(dict)` when given. If `validate`
+        raises (right JSON, wrong shape), that try counts as failed, so the retry
+        and the fallback model still get their turn. (PR2 review)
+        """
         for attempt, model in enumerate(self._tries()):
             if attempt > 0:
                 await self._sleep(BACKOFF[attempt - 1])  # short wait before retrying
@@ -67,9 +81,11 @@ class LlmClient:
                     },
                     timeout=TIMEOUT,
                     temperature=0,
+                    max_tokens=MAX_TOKENS,
                     **self._kwargs(model),
                 )
-                return json.loads(response.choices[0].message.content)
+                raw = json.loads(response.choices[0].message.content)
+                return validate(raw) if validate else raw
             except Exception as e:  # noqa: BLE001 - any failure here just means "try the next one"
                 log.warning("LLM try %d (%s) failed: %s", attempt + 1, model, type(e).__name__)
         raise LlmUnavailable()

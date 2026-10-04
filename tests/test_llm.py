@@ -89,3 +89,37 @@ def test_cap_stops_calls(sessions):
         count()
     day[0] = date(2026, 10, 5)  # a new day resets the count
     count()
+
+
+async def test_wrong_shape_answer_is_retried_then_falls_back():
+    # Valid JSON but the wrong shape must count as a failed try, so the
+    # 2nd try and the cloud fallback still run. (PR2 review)
+    completion = AsyncMock(
+        side_effect=[_reply('{"wrong": 1}'), _reply('{"wrong": 2}'), _reply('{"ok": 1}')]
+    )
+    client, _ = _client(completion, extract_fallback_model="anthropic/claude-haiku-4-5")
+
+    def validate(raw):
+        if "ok" not in raw:
+            raise ValueError("bad shape")
+        return raw["ok"]
+
+    assert await client.extract_json(MESSAGES, SCHEMA, Mock(), validate=validate) == 1
+    assert completion.await_count == 3
+
+
+async def test_answer_length_is_limited():
+    # A runaway local model must stop: max_tokens is always sent. (PR2 review)
+    completion = AsyncMock(return_value=_reply("{}"))
+    client, _ = _client(completion)
+    await client.extract_json(MESSAGES, SCHEMA, Mock())
+    assert completion.await_args.kwargs["max_tokens"] == 1500
+
+
+def test_litellm_uses_local_cost_map(monkeypatch):
+    # LiteLLM downloads a price list on import unless told not to. No network at startup/CI.
+    monkeypatch.delenv("LITELLM_LOCAL_MODEL_COST_MAP", raising=False)
+    import os
+
+    LlmClient(_settings())  # real import path (completion=None)
+    assert os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] == "True"
