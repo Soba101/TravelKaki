@@ -9,6 +9,7 @@ from travelkaki.main import app
 def test_health_ok_without_bot(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:fake-token")
     monkeypatch.setenv("RUN_BOT", "false")
+    monkeypatch.setenv("DATABASE_URL", "sqlite://")  # in-memory DB, don't touch ./data
     get_settings.cache_clear()  # settings are cached; reload with the env vars above
 
     # Using TestClient in a `with` block runs the app's startup + shutdown (lifespan).
