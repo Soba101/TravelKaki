@@ -5,8 +5,19 @@ from sqlalchemy import func, select
 from tests.fakes import FakeLlm, caption_fetcher, make_deps, make_source, places_answer
 from travelkaki.db import queries
 from travelkaki.db.models import Place, PlaceSource
+from travelkaki.geo.nominatim import GeoResult
 from travelkaki.ingest import pipeline
 from travelkaki.llm.client import LlmUnavailable
+
+
+class FakeGeo:
+    """locate() always returns the same pin + confidence."""
+
+    def __init__(self, lat=35.66, lng=139.70, confidence="high"):
+        self.answer = (GeoResult(lat, lng, "1-2 Shibuya"), confidence) if lat else (None, "none")
+
+    async def locate(self, name, city, center):
+        return self.answer
 
 
 def _count(sessions, model):
@@ -86,3 +97,86 @@ async def test_add_by_name(sessions):
     result = await pipeline.add_by_name(trip.id, "Ichiran Shibuya", make_deps(sessions))
     assert [p.name for p in result.places] == ["Ichiran Shibuya"]
     assert result.places[0].category == "place"
+
+
+async def test_geocoded_place_is_saved_with_pin(sessions):
+    _, source = make_source(sessions)
+    deps = make_deps(sessions, FakeLlm(places_answer("Ichiran")))
+    deps.geo = FakeGeo(confidence="low")
+    place = (await pipeline.run(source.id, deps)).places[0]
+    assert (place.lat, place.lng, place.address, place.confidence) == (
+        35.66,
+        139.70,
+        "1-2 Shibuya",
+        "low",
+    )
+
+
+async def test_same_place_from_another_link_is_merged(sessions):
+    trip, first = make_source(sessions)
+    with sessions() as s:
+        second = queries.add_source(s, trip.id, "https://www.tiktok.com/@b/video/2", "tiktok", 8)
+    deps = make_deps(sessions, FakeLlm(places_answer("Ichiran Shibuya")))
+    deps.geo = FakeGeo()
+    await pipeline.run(first.id, deps)
+    deps.llm = FakeLlm(places_answer("ichiran, shibuya"))
+
+    result = await pipeline.run(second.id, deps)
+
+    assert result.places == [] and result.merged == ["Ichiran Shibuya"]
+    assert _count(sessions, Place) == 1
+    assert _count(sessions, PlaceSource) == 2  # one place, linked to both posts
+
+
+async def test_retry_after_partial_save_makes_no_duplicates(sessions):
+    # PR3 review: a crash after some places were saved, then Retry, must not double them.
+    _, source = make_source(sessions)
+    deps = make_deps(sessions, FakeLlm(places_answer("A", "B")))
+    deps.geo = FakeGeo(lat=None)  # unpinned: dedupe by name
+    await pipeline.run(source.id, deps)
+    await pipeline.run(source.id, deps)
+    assert _count(sessions, Place) == 2
+
+
+async def test_fail_then_retry_succeeds(sessions):
+    _, source = make_source(sessions)
+    deps = make_deps(sessions, FakeLlm(error=LlmUnavailable()))
+    assert (await pipeline.run(source.id, deps)).error == "llm_unavailable"
+    with sessions() as s:
+        queries.reset_source(s, source.id)  # what the Retry button does
+    deps.llm = FakeLlm(places_answer("Ichiran"))
+    result = await pipeline.run(source.id, deps)
+    assert result.error is None and [p.name for p in result.places] == ["Ichiran"]
+
+
+async def test_retry_reuses_the_saved_caption(sessions):
+    # PR3 review: don't fetch again (Instagram may block a second fetch).
+    _, source = make_source(sessions)
+    with sessions() as s:
+        queries.set_source(
+            s, source.id, status="failed", error="llm_unavailable", caption="Ichiran!"
+        )
+    deps = make_deps(sessions, FakeLlm(places_answer("Ichiran")), fetch=caption_fetcher(text=None))
+    assert (await pipeline.run(source.id, deps)).error is None
+
+
+async def test_only_card_places_are_geocoded(sessions):
+    # PR4 review: geocoding is ~1 s per place for everyone. Pin the 10 places that get
+    # cards; save the rest unpinned so a 30-place post doesn't take over a minute.
+    _, source = make_source(sessions)
+    geo = FakeGeo()
+    calls = []
+    real = geo.locate
+
+    async def counting(name, city, center):
+        calls.append(name)
+        return await real(name, city, center)
+
+    geo.locate = counting
+    deps = make_deps(sessions, FakeLlm(places_answer(*[f"P{i}" for i in range(12)])))
+    deps.geo = geo
+    result = await pipeline.run(source.id, deps)
+    assert len(calls) == 10 and len(result.places) == 10 and result.extra == 2
+    with sessions() as s:
+        unpinned = [p for p in s.query(Place).all() if p.lat is None]
+    assert len(unpinned) == 2

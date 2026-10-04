@@ -96,3 +96,67 @@ async def test_places_without_trip(sessions):
     )
     await votes.places_command(update, ctx)
     assert "/newtrip" in ctx.bot.send_message.await_args.args[1]
+
+
+async def test_wrong_place_clears_the_pin(sessions):
+    trip, _ = make_source(sessions)
+    with sessions() as s:
+        place = pq.add_place(
+            s,
+            trip.id,
+            name="Ichiran",
+            category="ramen",
+            video_note="",
+            lat=35.6,
+            lng=139.7,
+            address="x",
+            confidence="low",
+        )
+    ctx, _ = _ctx(sessions)
+    q = _query(f"w:{place.id}")
+    await votes.on_callback(SimpleNamespace(callback_query=q, effective_chat=q.message.chat), ctx)
+    q.answer.assert_awaited_once_with("Pin removed")
+    with sessions() as s:
+        saved = pq.get_place(s, place.id)
+    assert (saved.lat, saved.lng, saved.confidence) == (None, None, "none")
+    text = q.edit_message_text.await_args.args[0]
+    assert text.endswith("❌ Pin removed")
+    markup = q.edit_message_text.await_args.kwargs["reply_markup"]
+    assert len(markup.inline_keyboard) == 1  # only the vote row is left
+
+
+def _failed_source(sessions, status="failed"):
+    from travelkaki.db import queries as q
+
+    _, source = make_source(sessions)
+    with sessions() as s:
+        q.set_source(s, source.id, status=status, error="llm_unavailable")
+    return source
+
+
+async def test_retry_restarts_a_failed_link(sessions):
+    from travelkaki.db import queries as q
+
+    source = _failed_source(sessions)
+    ctx, tasks = _ctx(sessions)
+    query = _query(f"r:{source.id}")
+    await votes.on_callback(
+        SimpleNamespace(callback_query=query, effective_chat=query.message.chat), ctx
+    )
+    query.answer.assert_awaited_once_with("Retrying…")
+    query.edit_message_reply_markup.assert_awaited_once_with(None)  # Retry button removed
+    assert len(tasks) == 1
+    with sessions() as s:
+        assert q.get_source(s, source.id).status == "pending"
+    tasks[0].close()
+
+
+async def test_retry_on_finished_link_does_nothing(sessions):
+    source = _failed_source(sessions, status="done")
+    ctx, tasks = _ctx(sessions)
+    query = _query(f"r:{source.id}")
+    await votes.on_callback(
+        SimpleNamespace(callback_query=query, effective_chat=query.message.chat), ctx
+    )
+    query.answer.assert_awaited_once_with("Nothing to retry.")
+    assert tasks == []

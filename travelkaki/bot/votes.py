@@ -11,10 +11,10 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from travelkaki.bot.cards import NO_TRIP, card_keyboard, parse_callback, places_text
-from travelkaki.bot.results import send
+from travelkaki.bot.results import post_pipeline, send
 from travelkaki.db import place_queries as pq
 from travelkaki.db import queries
-from travelkaki.db.models import Vote
+from travelkaki.db.models import SourceStatus, Vote
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +47,44 @@ async def _vote(query, chat_id: int, place_id: int, code: str, deps) -> None:
         log.debug("vote edit skipped: %s", e)
 
 
+async def _wrong_place(query, chat_id: int, place_id: int, deps) -> None:
+    """'👎 Wrong place': forget the pin, keep the place and its votes (#12)."""
+    with deps.sessions() as s:
+        if _chat_place(s, place_id, chat_id) is None:
+            await query.answer(GONE)
+            return
+        place = pq.clear_pin(s, place_id)
+        counts = pq.vote_counts(s, place_id)
+    await query.answer("Pin removed")
+    try:
+        await query.edit_message_text(
+            query.message.text_html + "\n❌ Pin removed",
+            parse_mode="HTML",
+            reply_markup=card_keyboard(place, counts),  # pin gone -> only the vote row
+        )
+    except TelegramError as e:
+        log.debug("wrong-place edit skipped: %s", e)
+
+
+async def _retry(query, chat_id: int, source_id: int, context, deps) -> None:
+    """'🔁 Retry' on a failure message: run the link through the pipeline again (#15)."""
+    with deps.sessions() as s:
+        source, trip = queries.get_source(s, source_id), queries.get_trip(s, chat_id)
+        mine = source is not None and trip is not None and source.trip_id == trip.id
+        if not mine or source.status != SourceStatus.failed:
+            await query.answer("Nothing to retry.")
+            return
+        queries.reset_source(s, source_id)
+    await query.answer("Retrying…")
+    try:
+        await query.edit_message_reply_markup(None)  # one tap is enough
+    except TelegramError as e:
+        log.debug("retry edit skipped: %s", e)
+    context.application.create_task(
+        post_pipeline(context.bot, chat_id, None, source_id, None, source.platform, deps)
+    )
+
+
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Any inline button tap."""
     query, deps = update.callback_query, context.bot_data["deps"]
@@ -58,8 +96,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     chat_id = query.message.chat.id
     if kind == "v":
         await _vote(query, chat_id, item_id, arg, deps)
+    elif kind == "w":
+        await _wrong_place(query, chat_id, item_id, deps)
     else:
-        await query.answer()  # 'w' (wrong place) and 'r' (retry) arrive in PR4
+        await _retry(query, chat_id, item_id, context, deps)
 
 
 async def places_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

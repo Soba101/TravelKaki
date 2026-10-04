@@ -2,8 +2,9 @@
 
 Fixed steps, not an agent:
     caption -> LLM extract -> save places
+    ... then each place: geocode -> dedupe -> save
 (Normalising the URL happens earlier, in the bot, because the duplicate check
-needs the canonical URL. Geocoding and dedupe are added in PR4.)
+needs the canonical URL.)
 
 Every outside call comes from `deps`, so tests run with fakes.
 Every failure sets the link to "failed" with an error code; the bot turns the
@@ -15,8 +16,10 @@ from dataclasses import dataclass, field
 
 from travelkaki.db import place_queries as pq
 from travelkaki.db import queries
-from travelkaki.db.models import Place, SourceStatus, Trip
+from travelkaki.db.models import Confidence, Place, SourceStatus, Trip
 from travelkaki.deps import Deps
+from travelkaki.ingest.captions import Caption
+from travelkaki.ingest.dedupe import find_duplicate
 from travelkaki.ingest.extract import ExtractedPlace, extract_places
 from travelkaki.llm.cap import CapReached, make_counter
 from travelkaki.llm.client import LlmUnavailable
@@ -48,11 +51,35 @@ def _fail(deps: Deps, source_id: int, code: str) -> PipelineResult:
     return PipelineResult(error=code)
 
 
-async def _save(trip: Trip, ex: ExtractedPlace, source_id: int | None, deps: Deps) -> Place | str:
-    """Save one place. Returns the new Place (or, from PR4, the name it merged into)."""
+async def _save(
+    trip: Trip, ex: ExtractedPlace, source_id: int | None, deps: Deps, geocode: bool = True
+) -> Place | str:
+    """Geocode + dedupe + save one place (#12, #13).
+
+    Returns the new Place, or the name of the saved place it was merged into.
+    geocode=False saves it without a pin (used for places beyond the card limit).
+    """
+    hit, confidence = None, Confidence.none
+    if deps.geo is not None and geocode:
+        center = (trip.city_lat, trip.city_lng) if trip.city_lat is not None else None
+        hit, confidence = await deps.geo.locate(ex.name, trip.city, center)
+    lat, lng, address = (hit.lat, hit.lng, hit.address) if hit else (None, None, None)
     with deps.sessions() as s:
+        same = find_duplicate(ex.name, lat, lng, pq.trip_places(s, trip.id))
+        if same is not None:  # already saved: just remember this post mentions it too
+            if source_id is not None:
+                pq.link_source(s, same.id, source_id)
+            return same.name
         place = pq.add_place(
-            s, trip.id, name=ex.name, category=ex.category or "place", video_note=ex.video_note
+            s,
+            trip.id,
+            name=ex.name,
+            category=ex.category or "place",
+            video_note=ex.video_note,
+            lat=lat,
+            lng=lng,
+            address=address,
+            confidence=confidence,
         )
         if source_id is not None:
             pq.link_source(s, place.id, source_id)
@@ -61,7 +88,9 @@ async def _save(trip: Trip, ex: ExtractedPlace, source_id: int | None, deps: Dep
 
 async def _save_all(trip, extracted, source_id, deps, result: PipelineResult) -> None:
     for ex in extracted:
-        saved = await _save(trip, ex, source_id, deps)
+        # Geocoding takes ~1 s per place (shared by every chat), so only pin the places
+        # that get a card. The rest are saved unpinned and listed in /places. (PR4 review)
+        saved = await _save(trip, ex, source_id, deps, geocode=len(result.places) < MAX_CARDS)
         if isinstance(saved, str):
             result.merged.append(saved)
         elif len(result.places) < MAX_CARDS:
@@ -76,7 +105,10 @@ async def _run(source_id: int, deps: Deps) -> PipelineResult:
         trip = s.get(Trip, source.trip_id)
         queries.set_source(s, source_id, status=SourceStatus.caption)
 
-    caption = await deps.fetch_caption(source.url, source.platform, deps.http)
+    if source.caption:  # a Retry: reuse the saved caption (Instagram may block a 2nd fetch)
+        caption = Caption(source.caption, None)
+    else:
+        caption = await deps.fetch_caption(source.url, source.platform, deps.http)
     if caption is None:
         return _fail(deps, source_id, NO_CAPTION)
     with deps.sessions() as s:  # keep the caption (for Retry and the M5 evals)
