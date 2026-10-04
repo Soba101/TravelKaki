@@ -13,7 +13,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     # Read from `.env` in the working directory. Real env vars win over the file.
     # extra="ignore": unknown keys in .env don't crash the app.
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # env_ignore_empty=True: a line like `EXTRACT_FALLBACK_MODEL=` counts as "not set",
+    # so the default (often None) is used instead of an empty string. (PR1 review.)
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     # Required. From BotFather. The app refuses to start without it.
     telegram_bot_token: str

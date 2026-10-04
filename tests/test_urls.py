@@ -24,6 +24,14 @@ REEL = "https://www.instagram.com/reel/C1a2B3c4D5e/"
         ("https://www.youtube.com/watch?v=x", None),
         ("https://www.tiktok.com/@a.b", None),  # a profile, not a post
         ("not a url", None),
+        # Telegram often sends links typed without https:// (PR1 review).
+        ("tiktok.com/@a.b/video/7312345678901234567", (VIDEO, "tiktok")),
+        ("www.instagram.com/reel/C1a2B3c4D5e/", (REEL, "instagram")),
+        # TikTok photo posts (slideshows) are common for travel lists.
+        (
+            "https://www.tiktok.com/@a.b/photo/7312345678901234567?x=1",
+            ("https://www.tiktok.com/@a.b/photo/7312345678901234567", "tiktok"),
+        ),
     ],
 )
 def test_canonical(url, expected):
@@ -35,6 +43,7 @@ def test_canonical(url, expected):
     [
         ("https://vm.tiktok.com/ZMabc123/", True),
         ("https://vt.tiktok.com/ZSabc123/", True),
+        ("vm.tiktok.com/ZMabc123/", True),
         ("https://www.tiktok.com/t/ZTabc/", True),
         ("https://www.instagram.com/share/reel/BAxyz/", True),
         (VIDEO, False),

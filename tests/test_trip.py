@@ -69,3 +69,25 @@ async def test_newtrip_bad_input_replies_error(sessions):
     assert "before" in message.reply_text.await_args.args[0]
     with sessions() as s:
         assert queries.get_trip(s, 1) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # A typed year is used. (PR1 review)
+        ("Tokyo 12-15 Dec 2027", NewTrip("Tokyo", date(2027, 12, 12), date(2027, 12, 15), None)),
+        # A trip already under way (ends today or later) stays in this year.
+        ("Tokyo 3-7 Oct", NewTrip("Tokyo", date(2026, 10, 3), date(2026, 10, 7), None)),
+    ],
+)
+def test_parse_year_rules(text, expected):
+    assert parse_newtrip(text, TODAY) == expected
+
+
+@pytest.mark.parametrize(
+    "text", ["Tokyo Dec 12-15", "Tokyo 12/12-15/12", "Tokyo 31 Feb", "Tokyo 12 Foo"]
+)
+def test_parse_unreadable_dates_are_errors(text):
+    # Never save a city like "Tokyo Dec 12-15" or a wrong date silently.
+    with pytest.raises(TripParseError):
+        parse_newtrip(text, TODAY)

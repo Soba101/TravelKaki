@@ -14,7 +14,8 @@ import httpx
 Platform = Literal["tiktok", "instagram"]
 
 # Post paths we understand. Anything else (profiles, YouTube, ...) is ignored.
-_TIKTOK_PATH = re.compile(r"^/@([^/]+)/video/(\d+)")
+# TikTok has video posts and photo (slideshow) posts.
+_TIKTOK_PATH = re.compile(r"^/@([^/]+)/(video|photo)/(\d+)")
 _IG_PATH = re.compile(r"^/(reel|reels|p)/([A-Za-z0-9_-]+)")
 
 # Short links that only redirect to the real post.
@@ -23,6 +24,12 @@ _SHORT_HOSTS = {"vm.tiktok.com", "vt.tiktok.com"}
 
 class LinkError(Exception):
     """A short link could not be opened (network error, timeout, ...)."""
+
+
+def _with_scheme(url: str) -> str:
+    """Telegram often sends links typed without https://. Add it so parsing works."""
+    url = url.strip()
+    return url if "://" in url else "https://" + url
 
 
 def _host(url: str) -> str:
@@ -36,9 +43,10 @@ def canonical(url: str) -> tuple[str, Platform] | None:
 
     Pure function: no network. Query strings and #fragments are dropped.
     """
+    url = _with_scheme(url)
     host, path = _host(url), urlparse(url).path
     if host == "tiktok.com" and (m := _TIKTOK_PATH.match(path)):
-        return f"https://www.tiktok.com/@{m[1]}/video/{m[2]}", "tiktok"
+        return f"https://www.tiktok.com/@{m[1]}/{m[2]}/{m[3]}", "tiktok"
     if host == "instagram.com" and (m := _IG_PATH.match(path)):
         kind = "p" if m[1] == "p" else "reel"  # /reels/ and /reel/ are the same thing
         return f"https://www.instagram.com/{kind}/{m[2]}/", "instagram"
@@ -47,6 +55,7 @@ def canonical(url: str) -> tuple[str, Platform] | None:
 
 def needs_redirect(url: str) -> bool:
     """True for short/share links that must be opened to find the real post."""
+    url = _with_scheme(url)
     host, path = _host(url), urlparse(url).path
     return (
         host in _SHORT_HOSTS
@@ -66,6 +75,7 @@ async def resolve(url: str, client: httpx.AsyncClient) -> str:
 
 async def normalise(url: str, client: httpx.AsyncClient) -> tuple[str, Platform] | None:
     """Canonical (URL, platform) for any TikTok/IG link, short links included."""
+    url = _with_scheme(url)
     if needs_redirect(url):
         url = await resolve(url, client)
     return canonical(url)

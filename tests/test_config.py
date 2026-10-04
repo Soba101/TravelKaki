@@ -33,3 +33,14 @@ def test_m1_defaults(monkeypatch):
     assert s.ollama_base_url == "http://host.docker.internal:11434"
     assert s.llm_daily_cap == 100
     assert s.nominatim_email is None
+
+
+def test_empty_env_values_mean_unset(monkeypatch):
+    # .env.example has lines like `EXTRACT_FALLBACK_MODEL=`. Empty must mean "not set",
+    # not the model name "". (Found in PR1 review.)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+    s = Settings(_env_file=".env.example")
+    assert s.extract_fallback_model is None
+    assert s.llm_api_key is None
+    assert s.nominatim_email is None
+    assert s.llm_daily_cap == 100

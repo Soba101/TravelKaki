@@ -26,12 +26,13 @@ USAGE = (
 
 _MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
 _DASH = r"\s*(?:-|–|to)\s*"
-# Tried in this order. Groups: day, month (and a second day, month for ranges).
+_YEAR = r"(?:\s+(\d{4}))?"  # optional year after the last month, e.g. "12-15 Dec 2027"
+# Tried in this order. Groups: day, month (a second day + month for ranges), then the year.
 _TWO_MONTHS = re.compile(
-    rf"(\d{{1,2}})\s+([a-z]{{3,}}){_DASH}(\d{{1,2}})\s+([a-z]{{3,}})", re.I
+    rf"(\d{{1,2}})\s+([a-z]{{3,}}){_DASH}(\d{{1,2}})\s+([a-z]{{3,}}){_YEAR}", re.I
 )  # 12 Dec - 3 Jan
-_ONE_MONTH = re.compile(rf"(\d{{1,2}}){_DASH}(\d{{1,2}})\s+([a-z]{{3,}})", re.I)  # 12-15 Dec
-_SINGLE = re.compile(r"(\d{1,2})\s+([a-z]{3,})", re.I)  # 5 Mar
+_ONE_MONTH = re.compile(rf"(\d{{1,2}}){_DASH}(\d{{1,2}})\s+([a-z]{{3,}}){_YEAR}", re.I)  # 12-15 Dec
+_SINGLE = re.compile(rf"(\d{{1,2}})\s+([a-z]{{3,}}){_YEAR}", re.I)  # 5 Mar
 
 
 @dataclass
@@ -53,19 +54,35 @@ def _month(word: str) -> int:
         raise TripParseError(f"I couldn't read the month “{word}”.\n{USAGE}") from None
 
 
-def _dates(d1: str, m1: str, d2: str, m2: str, today: date) -> tuple[date, date]:
-    """Build start/end dates. No year given, so pick the next upcoming one."""
+def _build(d1: str, m1: str, d2: str, m2: str, year: int) -> tuple[date, date]:
+    """Start/end dates when the trip starts in `year`. A range like 28 Dec - 3 Jan
+    crosses New Year, so the end moves to the next year."""
     try:
-        start = date(today.year, _month(m1), int(d1))
-        if start < today:
-            start = start.replace(year=today.year + 1)
-        end = date(start.year, _month(m2), int(d2))
-        if end < start and end.month < start.month:  # e.g. 28 Dec - 3 Jan: crosses new year
-            end = end.replace(year=start.year + 1)
-    except ValueError as e:  # e.g. 31 Feb
-        if isinstance(e, TripParseError):
-            raise
+        start = date(year, _month(m1), int(d1))
+        end = date(year, _month(m2), int(d2))
+    except TripParseError:
+        raise
+    except ValueError:  # e.g. 31 Feb
         raise TripParseError(f"That date doesn't exist.\n{USAGE}") from None
+    if end < start and end.month < start.month:
+        end = end.replace(year=year + 1)
+    return start, end
+
+
+def _dates(d1: str, m1: str, d2: str, m2: str, year: str | None, today: date) -> tuple[date, date]:
+    """Build start/end dates. Year rules:
+    - A typed year is the year of the last date ("28 Dec - 3 Jan 2027" ends in 2027).
+    - No year: this year, unless the trip would already be over, then next year.
+      (A trip that started yesterday but ends next week stays in this year.)
+    """
+    if year:
+        start, end = _build(d1, m1, d2, m2, int(year))
+        if end.year > int(year):  # the typed year belongs to the end date
+            start, end = _build(d1, m1, d2, m2, int(year) - 1)
+    else:
+        start, end = _build(d1, m1, d2, m2, today.year)
+        if end < today:
+            start, end = _build(d1, m1, d2, m2, today.year + 1)
     if end < start:
         raise TripParseError("End date is before start date. Example: /newtrip Tokyo 12-15 Dec")
     return start, end
@@ -80,14 +97,17 @@ def parse_newtrip(text: str, today: date) -> NewTrip:
     hotel = hotel or None
     start = end = None
     if m := _TWO_MONTHS.search(main):
-        start, end = _dates(m[1], m[2], m[3], m[4], today)
+        start, end = _dates(m[1], m[2], m[3], m[4], m[5], today)
     elif m := _ONE_MONTH.search(main):
-        start, end = _dates(m[1], m[3], m[2], m[3], today)
+        start, end = _dates(m[1], m[3], m[2], m[3], m[4], today)
     elif m := _SINGLE.search(main):
-        start, end = _dates(m[1], m[2], m[1], m[2], today)
+        start, end = _dates(m[1], m[2], m[1], m[2], m[3], today)
     city = (main[: m.start()] if m else main).strip()
-    if not city:
-        raise TripParseError(USAGE)
+    leftover = main[m.end() :].strip() if m else ""
+    # Digits left in the city, or text after the dates, means we misread the dates
+    # (e.g. "Tokyo Dec 12-15"). Say so instead of saving a wrong trip. (PR1 review.)
+    if not city or leftover or any(ch.isdigit() for ch in city):
+        raise TripParseError(f"I couldn't read that.\n{USAGE}")
     return NewTrip(city, start, end, hotel)
 
 
