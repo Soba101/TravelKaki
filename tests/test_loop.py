@@ -154,3 +154,12 @@ async def test_slow_model_hits_the_overall_time_limit(sessions, monkeypatch):
     deps, inp = _setup(sessions, SlowLlm())
     result = await run_planner(deps, inp, "run-1")
     assert not result.used_ai and result.plan == build_days(inp)
+
+
+def test_time_limit_leaves_room_for_polls():
+    """The agent's time limit must not cut off a 5-min poll wait (2 polls max)."""
+    from travelkaki.planner.ask import POLL_WAIT
+    from travelkaki.planner.loop import AGENT_TIMEOUT, time_limit
+
+    assert time_limit(ask=None) == AGENT_TIMEOUT
+    assert time_limit(ask=object()) == AGENT_TIMEOUT + 2 * POLL_WAIT

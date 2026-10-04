@@ -18,10 +18,11 @@ from dataclasses import dataclass
 from travelkaki.db import plan_queries as plq
 from travelkaki.llm.cap import CapReached, make_counter
 from travelkaki.llm.client import LlmUnavailable, ToolCall
+from travelkaki.planner.ask import POLL_WAIT
 from travelkaki.planner.build import build_days
 from travelkaki.planner.fit import day_label
 from travelkaki.planner.prompt import ASK_TOOL, SYSTEM_PROMPT, TOOLS
-from travelkaki.planner.tools import ToolState, run_tool
+from travelkaki.planner.tools import MAX_POLLS, ToolState, run_tool
 from travelkaki.planner.types import Issue, Plan, PlanInput
 from travelkaki.planner.validate import validate
 
@@ -39,6 +40,11 @@ class PlanResult:
     used_ai: bool  # False = the code-only fallback made this plan
     tradeoffs: str  # the agent's short summary ("" without AI)
     rounds: int  # LLM rounds used
+
+
+def time_limit(ask) -> float:
+    """Seconds for the whole agent run. Poll waits (up to 2 x 5 min) come on top."""
+    return AGENT_TIMEOUT + (MAX_POLLS * POLL_WAIT if ask is not None else 0)
 
 
 def _text_call(content: str | None) -> ToolCall | None:
@@ -126,9 +132,9 @@ async def run_planner(deps, inp: PlanInput, run_id: str, ask=None) -> PlanResult
     used = [0]  # rounds, counted inside _agent (still known after a timeout)
     if deps.llm is not None:
         try:
-            await asyncio.wait_for(_agent(deps, inp, st, trace, tools, used), AGENT_TIMEOUT)
+            await asyncio.wait_for(_agent(deps, inp, st, trace, tools, used), time_limit(ask))
         except TimeoutError:
-            log.warning("planner agent timed out after %ss", AGENT_TIMEOUT)
+            log.warning("planner agent timed out after %ss", time_limit(ask))
     rounds = used[0]
     if st.saved:
         plan, used_ai, tradeoffs = st.draft, True, st.tradeoffs

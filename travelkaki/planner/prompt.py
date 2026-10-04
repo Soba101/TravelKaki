@@ -5,6 +5,9 @@ Tool arguments are tiny on purpose (ids and day numbers), so the model can't
 get lost in big JSON.
 """
 
+from travelkaki.planner.fit import day_label, hhmm
+from travelkaki.planner.types import Plan, PlanInput
+
 SYSTEM_PROMPT = """You plan a group trip, day by day, using tools.
 
 Goal: a plan with every Must-go place in it, if that is possible.
@@ -62,3 +65,15 @@ ASK_TOOL = _fn(
     {"question": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}}},
     ["question", "options"],
 )
+
+
+def plan_summary(plan: Plan, inp: PlanInput) -> str:
+    """Short text form of a plan for the model: one line per day + dropped places."""
+    names = {p.id: p.name for p in inp.places}
+    lines = []
+    for n, day in enumerate(plan.days, start=1):
+        stops = ", ".join(f"{names.get(s.place_id, s.place_id)} {hhmm(s.start)}" for s in day.stops)
+        lines.append(f"Day {n} ({day_label(day.date)}): {stops or 'free day'}")
+    if plan.dropped:
+        lines.append("Dropped: " + "; ".join(f"{d.name} ({d.reason})" for d in plan.dropped))
+    return "\n".join(lines)

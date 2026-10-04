@@ -171,3 +171,14 @@ async def test_failed_edit_falls_back_to_a_new_message(sessions):
     await plan_command(update, ctx)
     await tasks[0]
     assert "/newtrip" in _sent(ctx)[-1]
+
+
+async def test_plan_offers_ask_group(sessions):
+    """M2 PR3: /plan gives the agent the poll tool."""
+    _trip(sessions)
+    llm = FakeToolLlm(GOOD_RUN)
+    update, ctx, tasks = _ctx(sessions, llm=llm)
+    await plan_command(update, ctx)
+    await tasks[0]
+    assert "ask_group" in llm.seen[0][1]
+    assert ctx.bot_data["polls"] == {}

@@ -20,6 +20,7 @@ from travelkaki.bot.cards import NO_TRIP
 from travelkaki.bot.plan_text import format_plan
 from travelkaki.bot.results import send
 from travelkaki.db import plan_queries as plq
+from travelkaki.planner.ask import ask_group
 from travelkaki.planner.loop import run_planner
 from travelkaki.planner.prepare import PlanError, prepare
 from travelkaki.planner.types import Window
@@ -73,13 +74,19 @@ async def plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         planning.discard(chat_id)  # don't leave the chat locked
         raise
     deps = context.bot_data["deps"]
+    polls = context.bot_data.setdefault("polls", {})  # open ask_group polls (on_poll reads it)
     context.application.create_task(
-        run_plan(context.bot, chat_id, window, deps, progress.message_id, planning)
+        run_plan(context.bot, chat_id, window, deps, progress.message_id, planning, polls)
     )
 
 
-async def run_plan(bot, chat_id: int, window: Window, deps, progress_id: int, planning) -> None:
-    """The background part: prepare -> agent -> save -> post. Always unlocks the chat."""
+async def run_plan(
+    bot, chat_id: int, window: Window, deps, progress_id: int, planning, polls: dict | None = None
+) -> None:
+    """The background part: prepare -> agent -> save -> post. Always unlocks the chat.
+
+    With `polls` (the bot's open-poll table), the agent may ask the group (#20).
+    """
     run_id = str(uuid.uuid4())
 
     async def progress(text: str, final: bool = False) -> None:
@@ -94,7 +101,17 @@ async def run_plan(bot, chat_id: int, window: Window, deps, progress_id: int, pl
     try:
         inp = await prepare(deps, chat_id, window, progress=progress)
         await progress("Planning the days… 🧠")
-        result = await run_planner(deps, inp, run_id)
+
+        async def ask(question: str, options: list[str]) -> dict[str, int]:
+            """The agent's ask_group tool: a poll that closes once everyone who voted answered."""
+            await progress("Waiting for the poll (up to 5 min)…")
+            with deps.sessions() as s:
+                target = max(1, plq.voter_count(s, inp.trip_id))
+            votes = await ask_group(bot, chat_id, question, options, target, polls)
+            await progress("Planning the days… 🧠")
+            return votes
+
+        result = await run_planner(deps, inp, run_id, ask=ask if polls is not None else None)
         with deps.sessions() as s:
             saved = plq.save_itinerary(
                 s, inp.trip_id, run_id, result.plan,
