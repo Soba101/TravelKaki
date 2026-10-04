@@ -112,3 +112,16 @@ def test_plan_summary_lists_dropped():
     st = _state()
     plan = build_days(st.inp)
     assert "Day 2 (Wed 16 Dec)" in plan_summary(plan, st.inp)
+
+
+async def test_validate_wording_for_left_out_must_go():
+    """Live run: 'error missing_must' + 'savable: yes' confused the 4B model into
+    looping. A dropped Must-go is shown as 'left out', with a hint, and a savable
+    draft says to call save_plan now."""
+    st = ToolState(make_input([place(1, hours="Mo 10:00-18:00")], days=2))  # closed Tue + Wed
+    await run_tool("build_days", "{}", st)
+    report = await run_tool("validate", "{}", st)
+    assert "error missing_must" not in report
+    assert "left out: Place 1 (closed on Tue 15 Dec)" in report
+    assert "pin it to another day" in report
+    assert report.endswith("savable: yes. Call save_plan now.")

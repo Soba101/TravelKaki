@@ -166,3 +166,11 @@ def test_far_place_goes_first_on_its_day():
     near_far = place(8, 36.302, 139.70)
     plan = build_days(make_input([far, near_far], days=1))
     assert planned_ids(plan)[1][0] in (8, 9) and len(planned_ids(plan)[1]) == 2
+
+
+def test_pin_to_a_closed_day_is_moved():
+    """Live run: the model pinned a Must-go to the day it's closed. A pin is a wish,
+    not a reason to lose a Must-go: if it's closed that day, the repair pass moves it."""
+    p = place(1, hours="Mo,We-Su 09:00-22:00")  # closed Tuesday
+    plan = build_days(make_input([p], days=2), Priorities(pins={1: 1}))
+    assert planned_ids(plan) == {1: [], 2: [1]}

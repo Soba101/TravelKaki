@@ -124,9 +124,23 @@ def _validate(st: ToolState, args: dict) -> str:
     if st.draft is None:
         raise ToolError("call build_days first")
     st.issues = validate(st.draft, st.inp)
-    lines = [f"{i.level} {i.code}: {i.text}" for i in st.issues] or ["no issues"]
-    lines.append(f"savable: {'yes' if savable(st.draft, st.issues) else 'no'}")
-    return "\n".join(lines)
+    # Must-gos that build_days left out (with a reason) are NOT errors you must fix.
+    # Saying "error" + "savable: yes" made the small model loop in a live run,
+    # so they're shown as "left out", with a hint for the one fix that can help.
+    dropped = {d.place_id: d for d in st.draft.dropped}
+    lines = []
+    for i in st.issues:
+        if i.code == "missing_must" and i.place_id in dropped:
+            d = dropped[i.place_id]
+            hint = " - pin it to another day, or accept it" if "closed" in d.reason else ""
+            lines.append(f"left out: {d.name} ({d.reason}){hint}")
+        else:
+            lines.append(f"{i.level} {i.code}: {i.text}")
+    if savable(st.draft, st.issues):
+        lines.append("savable: yes. Call save_plan now.")
+    else:
+        lines.append("savable: no. Fix the errors with build_days.")
+    return "\n".join(lines or ["no issues"])
 
 
 def _save(st: ToolState, args: dict) -> str:
