@@ -132,8 +132,11 @@ async def newtrip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     deps = context.bot_data["deps"]
+    # Find the city on the map once; place searches are then kept near it (#12).
+    city = await deps.geo.search(trip.city) if deps.geo else None
+    lat, lng = (city.lat, city.lng) if city else (None, None)
     with deps.sessions() as s:
-        queries.upsert_trip(s, chat_id, trip.city, trip.start, trip.end, trip.hotel)
+        queries.upsert_trip(s, chat_id, trip.city, trip.start, trip.end, trip.hotel, lat, lng)
     await update.effective_message.reply_text(
         f"✈️ Trip set: {_describe(trip)}\nNow drop TikTok or Instagram links here!"
     )

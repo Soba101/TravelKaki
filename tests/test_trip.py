@@ -91,3 +91,31 @@ def test_parse_unreadable_dates_are_errors(text):
     # Never save a city like "Tokyo Dec 12-15" or a wrong date silently.
     with pytest.raises(TripParseError):
         parse_newtrip(text, TODAY)
+
+
+class FakeGeo:
+    def __init__(self, result):
+        self.result, self.queries = result, []
+
+    async def search(self, query, box=None):
+        self.queries.append(query)
+        return self.result
+
+
+async def test_newtrip_geocodes_the_city(sessions):
+    from travelkaki.geo.nominatim import GeoResult
+
+    update, context, _ = _fake(["Tokyo", "12-15", "Dec"], sessions)
+    context.bot_data["deps"].geo = FakeGeo(GeoResult(35.68, 139.77, "Tokyo, Japan"))
+    await newtrip(update, context)
+    with sessions() as s:
+        trip = queries.get_trip(s, 1)
+    assert (trip.city_lat, trip.city_lng) == (35.68, 139.77)
+
+
+async def test_newtrip_saves_even_if_city_not_found(sessions):
+    update, context, _ = _fake(["Atlantis"], sessions)
+    context.bot_data["deps"].geo = FakeGeo(None)
+    await newtrip(update, context)
+    with sessions() as s:
+        assert queries.get_trip(s, 1).city_lat is None
