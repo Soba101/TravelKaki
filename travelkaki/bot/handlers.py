@@ -24,6 +24,14 @@ WELCOME_TEXT = (
 )
 
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Any handler crashed: log the traceback and still answer. (PR3 review: never silent.)"""
+    log.error("handler failed", exc_info=context.error)
+    chat = getattr(update, "effective_chat", None)
+    if chat is not None:
+        await context.bot.send_message(chat.id, "Something went wrong. Please try again.")
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Reply to /start with the welcome + privacy notice."""
     # One log line per command: chat id only, never the message text (#3 follow-up).

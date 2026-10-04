@@ -4,11 +4,12 @@ Started with application.create_task(...) by bot/links.py, so the chat
 handler returns at once while the (slower) LLM work happens here.
 """
 
+import asyncio
 import logging
 from html import escape
 
 from telegram import LinkPreviewOptions, ReplyParameters
-from telegram.error import TelegramError
+from telegram.error import RetryAfter, TelegramError
 
 from travelkaki.bot.cards import card_keyboard, card_text, error_text, retry_keyboard
 from travelkaki.db import queries
@@ -19,26 +20,45 @@ from travelkaki.ingest.pipeline import PipelineResult
 
 log = logging.getLogger(__name__)
 
-# Errors where pressing Retry can help (the others need a different action).
-RETRYABLE = {pipeline.LLM_UNAVAILABLE, pipeline.UNKNOWN, "interrupted"}
+# Errors where pressing Retry can help later (no_places needs a different action).
+RETRYABLE = {
+    pipeline.LLM_UNAVAILABLE,
+    pipeline.UNKNOWN,
+    pipeline.CAP_REACHED,  # works again tomorrow
+    pipeline.NO_CAPTION,  # Instagram blocks are often temporary
+    "interrupted",
+}
 
 
 async def send(bot, chat_id: int, text: str, reply_to: int | None = None, markup=None) -> None:
-    """Send one HTML message. A Telegram error is logged, never crashes the task."""
-    try:
-        await bot.send_message(
-            chat_id,
-            text,
-            parse_mode="HTML",
-            reply_markup=markup,
-            # Reply to the posted link when we can; still send if it was deleted.
-            reply_parameters=ReplyParameters(reply_to, allow_sending_without_reply=True)
-            if reply_to
-            else None,
-            link_preview_options=LinkPreviewOptions(is_disabled=True),  # no big map previews
-        )
-    except TelegramError as e:
-        log.warning("send failed chat=%s: %s", chat_id, e)
+    """Send one HTML message. A Telegram error is logged, never crashes the task.
+
+    Telegram allows ~20 messages a minute per group. If we hit that (RetryAfter),
+    wait as long as Telegram asks and try once more, so no card is lost. (PR3 review)
+    """
+    for attempt in range(2):
+        try:
+            await bot.send_message(
+                chat_id,
+                text,
+                parse_mode="HTML",
+                reply_markup=markup,
+                # Reply to the posted link when we can; still send if it was deleted.
+                reply_parameters=ReplyParameters(reply_to, allow_sending_without_reply=True)
+                if reply_to
+                else None,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),  # no big previews
+            )
+            return
+        except RetryAfter as e:
+            wait = e.retry_after
+            wait = wait.total_seconds() if hasattr(wait, "total_seconds") else wait
+            log.warning("flood limit chat=%s, waiting %ss", chat_id, wait)
+            if attempt == 0:
+                await asyncio.sleep(wait)
+        except TelegramError as e:
+            log.warning("send failed chat=%s: %s", chat_id, e)
+            return
 
 
 async def _post(bot, chat_id, reply_to, result: PipelineResult, poster, platform, deps, source_id):
@@ -57,13 +77,25 @@ async def _post(bot, chat_id, reply_to, result: PipelineResult, poster, platform
         await send(bot, chat_id, f"+{result.extra} more, see /places", reply_to)
 
 
+async def _never_silent(bot, chat_id, reply_to) -> None:
+    """A background task broke: log it and still tell the group. (PR3 review)"""
+    log.exception("background task failed chat=%s", chat_id)
+    await send(bot, chat_id, error_text(pipeline.UNKNOWN, bot.username), reply_to)
+
+
 async def post_pipeline(bot, chat_id, reply_to, source_id, poster, platform, deps: Deps) -> None:
     """Background task for a posted link."""
-    result = await pipeline.run(source_id, deps)
-    await _post(bot, chat_id, reply_to, result, poster, platform, deps, source_id)
+    try:
+        result = await pipeline.run(source_id, deps)
+        await _post(bot, chat_id, reply_to, result, poster, platform, deps, source_id)
+    except Exception:
+        await _never_silent(bot, chat_id, reply_to)
 
 
 async def post_text_add(bot, chat_id, reply_to, trip_id, name, deps: Deps) -> None:
     """Background task for '@bot add <name>' and '/add <name>'."""
-    result = await pipeline.add_by_name(trip_id, name, deps)
-    await _post(bot, chat_id, reply_to, result, None, None, deps, None)
+    try:
+        result = await pipeline.add_by_name(trip_id, name, deps)
+        await _post(bot, chat_id, reply_to, result, None, None, deps, None)
+    except Exception:
+        await _never_silent(bot, chat_id, reply_to)

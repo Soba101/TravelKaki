@@ -112,11 +112,64 @@ async def test_link_without_trip_says_start_a_trip(sessions):
     assert _sources(sessions) == 0 and tasks == []
 
 
+def _set_status(sessions, source_id, status, error=None):
+    with sessions() as s:
+        queries.set_source(s, source_id, status=status, error=error)
+
+
 async def test_same_link_twice_is_already_saved(sessions):
-    make_source(sessions, url=TIKTOK)
+    _, source = make_source(sessions, url=TIKTOK)
+    _set_status(sessions, source.id, "done")
     ctx, tasks = _ctx(sessions)
     await links.on_message(_update(_url_message(TIKTOK + "?x=1")), ctx)
     assert _sent(ctx) == ["Already saved ✅"] and tasks == []
+
+
+async def test_same_link_while_reading_says_still_reading(sessions):
+    make_source(sessions, url=TIKTOK)  # still pending
+    ctx, tasks = _ctx(sessions)
+    await links.on_message(_update(_url_message(TIKTOK)), ctx)
+    assert _sent(ctx) == ["Still reading that one 👀"] and tasks == []
+
+
+async def test_reposting_a_failed_link_tries_again(sessions):
+    # After e.g. cap_reached or a temporary IG block, posting again must work. (PR3 review)
+    _, source = make_source(sessions, url=TIKTOK)
+    _set_status(sessions, source.id, "failed", "no_caption")
+    ctx, tasks = _ctx(sessions)
+    await links.on_message(_update(_url_message(TIKTOK)), ctx)
+    assert len(tasks) == 1 and _sent(ctx) == []
+    with sessions() as s:
+        assert queries.get_source(s, source.id).status == "pending"
+    _close(tasks)
+
+
+def test_mention_add_stops_at_end_of_line():
+    # Never store the rest of someone's message as a place name. (PR3 review)
+    text = "@travelkakiibot add Ichiran\nalso my flight lands at 9"
+    assert links.parse_mention_add(text, "travelkakiibot") == "Ichiran"
+
+
+async def test_text_add_failure_still_replies(sessions):
+    # The bot is never silent, even if a background task breaks. (PR3 review)
+    ctx, _ = _ctx(sessions)
+    await results.post_text_add(ctx.bot, 1, 50, trip_id=999, name="X", deps=make_deps(sessions))
+    assert "Something went wrong" in _sent(ctx)[0]
+
+
+async def test_send_waits_and_retries_on_flood_limit(monkeypatch):
+    # Telegram's per-group limit (~20 msgs/min) must not silently drop cards. (PR3 review)
+    from telegram.error import RetryAfter
+
+    sleeps = []
+
+    async def fake_sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(results.asyncio, "sleep", fake_sleep)
+    bot = SimpleNamespace(send_message=AsyncMock(side_effect=[RetryAfter(3), None]))
+    await results.send(bot, 1, "card")
+    assert bot.send_message.await_count == 2 and sleeps == [3]
 
 
 async def test_other_links_and_chat_are_ignored(sessions):

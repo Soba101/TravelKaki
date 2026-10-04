@@ -58,6 +58,11 @@ def add_source(s: Session, trip_id: int, url: str, platform: str, added_by: int)
     return source
 
 
+def find_source(s: Session, trip_id: int, url: str) -> Source | None:
+    """This trip's row for a (normalised) link, if it was posted before."""
+    return s.scalar(select(Source).where(Source.trip_id == trip_id, Source.url == url))
+
+
 def get_source(s: Session, source_id: int) -> Source | None:
     return s.get(Source, source_id)
 

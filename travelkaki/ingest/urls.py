@@ -68,7 +68,7 @@ async def resolve(url: str, client: httpx.AsyncClient) -> str:
     """Follow redirects and return the final URL. Raises LinkError on failure."""
     try:
         response = await client.get(url, follow_redirects=True, timeout=10)
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, httpx.InvalidURL) as e:  # InvalidURL isn't an HTTPError
         raise LinkError(str(e)) from e
     return str(response.url)
 

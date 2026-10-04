@@ -78,3 +78,12 @@ async def test_normalise_network_error_raises_link_error():
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(LinkError):
             await normalise("https://vm.tiktok.com/ZMabc123/", client)
+
+
+async def test_invalid_redirect_target_raises_link_error():
+    def handler(request):
+        raise httpx.InvalidURL("bad")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(LinkError):
+            await normalise("https://vm.tiktok.com/ZMabc123/", client)

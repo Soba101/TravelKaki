@@ -16,6 +16,7 @@ from telegram.ext import ContextTypes
 from travelkaki.bot.cards import NO_TRIP, error_text
 from travelkaki.bot.results import post_pipeline, post_text_add, send
 from travelkaki.db import queries
+from travelkaki.db.models import SourceStatus
 from travelkaki.ingest.urls import LinkError, canonical, needs_redirect, normalise
 
 log = logging.getLogger(__name__)
@@ -37,7 +38,8 @@ def find_links(message) -> list[str]:
 
 def parse_mention_add(text: str, bot_username: str) -> str | None:
     """'@travelkakiibot add Ichiran' -> 'Ichiran' (any letter case). Else None."""
-    match = re.search(rf"@{re.escape(bot_username)}\s+add\s+(.+)", text or "", re.I | re.S)
+    # [^\n]+ = stop at the end of the line: never store the rest of someone's message.
+    match = re.search(rf"@{re.escape(bot_username)}[ \t]+add[ \t]+([^\n]+)", text or "", re.I)
     return match[1].strip() if match else None
 
 
@@ -65,9 +67,14 @@ async def handle_link(url: str, update: Update, context: ContextTypes.DEFAULT_TY
             await send(context.bot, chat_id, NO_TRIP, message.message_id)
             return False
         source = queries.add_source(s, trip.id, canonical_url, platform, update.effective_user.id)
-    if source is None:
-        await send(context.bot, chat_id, "Already saved ✅", message.message_id)
-        return True
+        if source is None:  # posted before: what happened to it? (PR3 review)
+            source = queries.find_source(s, trip.id, canonical_url)
+            if source.status != SourceStatus.failed:
+                done = source.status == SourceStatus.done
+                text = "Already saved ✅" if done else "Still reading that one 👀"
+                await send(context.bot, chat_id, text, message.message_id)
+                return True
+            queries.reset_source(s, source.id)  # failed before: try again
     log.info("link chat=%s platform=%s", chat_id, platform)  # never the URL or message text
     try:
         await context.bot.set_message_reaction(chat_id, message.message_id, "👀")
