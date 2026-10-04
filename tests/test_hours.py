@@ -65,3 +65,10 @@ def test_unknown_forms(raw):
     assert parse(raw) is None
     assert is_open(raw, 0, 720) is None
     assert next_open(raw, 0, 720) is None
+
+
+def test_spaces_after_commas():
+    """Real OSM data (Tokyo National Museum) puts spaces after commas."""
+    hours = parse("Mo, We-Th 09:30-17:00; Fr-Su 09:30-20:00")
+    assert hours[0] == [(570, 1020)] and hours[1] == [] and hours[4] == [(570, 1200)]
+    assert parse("Mo-Fr 11:00-14:00, 17:00-22:00")[0] == [(660, 840), (1020, 1320)]

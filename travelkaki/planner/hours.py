@@ -60,6 +60,7 @@ def parse(raw: str | None) -> dict[int, list[tuple[int, int]]] | None:
     if not raw or not raw.strip():
         return None
     raw = raw.strip()
+    raw = re.sub(r",\s+", ",", raw)  # real OSM data often writes "Mo, We" -> "Mo,We"
     if raw == "24/7":
         return {d: [(0, 1440)] for d in range(7)}
     week: dict[int, list[tuple[int, int]]] = {d: [] for d in range(7)}  # unlisted = closed
