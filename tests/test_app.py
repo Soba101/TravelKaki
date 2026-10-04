@@ -50,3 +50,10 @@ async def test_error_handler_replies():
     update = SimpleNamespace(effective_chat=SimpleNamespace(id=5))
     await on_error(update, SimpleNamespace(bot=bot, error=RuntimeError("bug")))
     assert "Something went wrong" in bot.send_message.await_args.args[1]
+
+
+def test_telegram_timeouts_are_generous():
+    # PR3 demo: a card send timed out at PTB's 5 s default while Ollama was busy.
+    bot = build_application("123:fake-token").bot
+    assert bot.request.read_timeout == 20
+    assert bot.request._client.timeout.write == 20  # PTB has no public getter for this one

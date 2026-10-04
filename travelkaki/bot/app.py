@@ -39,7 +39,9 @@ def build_application(token: str, deps: Deps | None = None) -> Application:
     `deps` (database, HTTP client, LLM, ...) is stored in bot_data so every
     handler can reach it as context.bot_data["deps"].
     """
-    app = Application.builder().token(token).build()
+    # 20 s timeouts (default 5 s): sends timed out in the PR3 demo while the Mac was busy
+    # running the local LLM, and a place card was lost.
+    app = Application.builder().token(token).read_timeout(20).write_timeout(20).build()
     app.bot_data["deps"] = deps
     # One line per command. NEW_ONLY: editing a command must not run it again (PR3 review).
     app.add_handler(CommandHandler("start", start, filters=NEW_ONLY))
