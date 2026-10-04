@@ -5,9 +5,10 @@ Building does NOT connect to Telegram. Starting/stopping happens in
 """
 
 from telegram import BotCommand
-from telegram.ext import Application, CommandHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from travelkaki.bot.handlers import start
+from travelkaki.bot.links import add_command, on_message
 from travelkaki.bot.trip import newtrip
 from travelkaki.deps import Deps
 
@@ -32,6 +33,15 @@ def build_application(token: str, deps: Deps | None = None) -> Application:
     # One line per command.
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("newtrip", newtrip))
+    app.add_handler(CommandHandler("add", add_command))
+    # Every other new message with text or a caption (photos/videos with links too).
+    # UpdateType.MESSAGE = new messages only: an edit must not read a link twice.
+    app.add_handler(
+        MessageHandler(
+            filters.UpdateType.MESSAGE & (filters.TEXT | filters.CAPTION) & ~filters.COMMAND,
+            on_message,
+        )
+    )
     return app
 
 
