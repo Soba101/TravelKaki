@@ -10,7 +10,7 @@ from telegram import Update
 from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
-from travelkaki.bot.cards import NO_TRIP, card_keyboard, parse_callback, places_text
+from travelkaki.bot.cards import NO_TRIP, list_keyboard, parse_callback, places_text
 from travelkaki.bot.results import post_pipeline, send
 from travelkaki.db import place_queries as pq
 from travelkaki.db import queries
@@ -21,6 +21,19 @@ log = logging.getLogger(__name__)
 GONE = "This place no longer exists."
 VALUES = {"m": "must", "y": "maybe", "s": "skip"}
 TOASTS = {"must": "Voted Must-go", "maybe": "Voted Maybe", "skip": "Voted Skip"}
+
+
+def _redraw(s, message, fallback_id: int):
+    """Fresh buttons for every place on the tapped message, in the same order (#49).
+
+    The place ids are read back from the message's own vote buttons, so no extra
+    database table is needed. Old one-card messages work the same way.
+    """
+    rows = getattr(getattr(message, "reply_markup", None), "inline_keyboard", None) or []
+    parsed = [parse_callback(row[0].callback_data) for row in rows if row]
+    ids = [p[1] for p in parsed if p and p[0] == "v"] or [fallback_id]
+    places = [p for p in (pq.get_place(s, i) for i in ids) if p is not None]
+    return list_keyboard(places, {p.id: pq.vote_counts(s, p.id) for p in places})
 
 
 def _chat_place(s, place_id: int, chat_id: int):
@@ -36,13 +49,14 @@ async def _vote(query, chat_id: int, place_id: int, code: str, deps) -> None:
         if place is None:
             await query.answer(GONE)
             return
-        counts = pq.vote(s, place_id, user_id, VALUES[code])
+        pq.vote(s, place_id, user_id, VALUES[code])
         mine = s.scalar(
             select(Vote.value).where(Vote.place_id == place_id, Vote.tg_user_id == user_id)
         )
+        markup = _redraw(s, query.message, place_id)
     await query.answer(TOASTS[mine] if mine else "Vote removed")
     try:
-        await query.edit_message_reply_markup(card_keyboard(place, counts))
+        await query.edit_message_reply_markup(markup)
     except TelegramError as e:  # e.g. "message is not modified" after fast double taps
         log.debug("vote edit skipped: %s", e)
 
@@ -53,15 +67,11 @@ async def _wrong_place(query, chat_id: int, place_id: int, deps) -> None:
         if _chat_place(s, place_id, chat_id) is None:
             await query.answer(GONE)
             return
-        place = pq.clear_pin(s, place_id)
-        counts = pq.vote_counts(s, place_id)
+        pq.clear_pin(s, place_id)
+        markup = _redraw(s, query.message, place_id)  # that row loses its 👎📍 button
     await query.answer("Pin removed")
     try:
-        await query.edit_message_text(
-            query.message.text_html + "\n❌ Pin removed",
-            parse_mode="HTML",
-            reply_markup=card_keyboard(place, counts),  # pin gone -> only the vote row
-        )
+        await query.edit_message_reply_markup(markup)
     except TelegramError as e:
         log.debug("wrong-place edit skipped: %s", e)
 

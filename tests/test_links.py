@@ -232,10 +232,10 @@ async def test_post_pipeline_sends_cards(sessions, monkeypatch):
     ctx, _ = _ctx(sessions)
     await results.post_pipeline(ctx.bot, 1, 50, source.id, "Alex", "tiktok", make_deps(sessions))
     calls = ctx.bot.send_message.await_args_list
-    assert len(calls) == 3  # 2 cards + "+3 more"
-    assert all(c.kwargs["parse_mode"] == "HTML" for c in calls)
-    assert calls[0].kwargs["reply_markup"] is not None
-    assert "+3 more" in _sent(ctx)[2]
+    assert len(calls) == 1  # ONE message per link, not one per place (#49)
+    assert calls[0].kwargs["parse_mode"] == "HTML"
+    assert len(calls[0].kwargs["reply_markup"].inline_keyboard) == 2  # a row per place
+    assert "+3 more" in _sent(ctx)[0]
 
 
 async def test_post_pipeline_error_has_retry(sessions, monkeypatch):
@@ -310,3 +310,12 @@ async def test_announce_survives_a_chat_that_removed_the_bot(sessions):
     ctx.bot.send_message.side_effect = [Forbidden("bot was kicked"), None]
     await results.announce_interrupted(ctx.bot, deps)  # must not raise
     assert ctx.bot.send_message.await_count == 2
+
+
+async def test_only_merged_places_send_one_line(sessions, monkeypatch):
+    _, source = make_source(sessions)
+    result = PipelineResult(merged=["Tsukiji Market"])
+    monkeypatch.setattr(results.pipeline, "run", AsyncMock(return_value=result))
+    ctx, _ = _ctx(sessions)
+    await results.post_pipeline(ctx.bot, 1, 50, source.id, "Alex", "tiktok", make_deps(sessions))
+    assert _sent(ctx) == ["Already saved: Tsukiji Market (+1 link)"]

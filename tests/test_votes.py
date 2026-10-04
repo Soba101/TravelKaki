@@ -8,11 +8,17 @@ from travelkaki.bot import votes
 from travelkaki.db import place_queries as pq
 
 
-def _query(data, user_id=7, chat_id=1):
+def _query(data, user_id=7, chat_id=1, place_ids=()):
+    """A button tap. `place_ids` = the places listed on the tapped message (#49)."""
+    from travelkaki.bot.cards import list_keyboard
+
+    markup = list_keyboard([SimpleNamespace(id=i, confidence="none") for i in place_ids], {})
     return SimpleNamespace(
         data=data,
         from_user=SimpleNamespace(id=user_id),
-        message=SimpleNamespace(chat=SimpleNamespace(id=chat_id), text_html="card"),
+        message=SimpleNamespace(
+            chat=SimpleNamespace(id=chat_id), text_html="card", reply_markup=markup
+        ),
         answer=AsyncMock(),
         edit_message_reply_markup=AsyncMock(),
         edit_message_text=AsyncMock(),
@@ -44,14 +50,14 @@ async def test_vote_updates_counts_and_toggles(sessions):
     place = _place(sessions)
     ctx, _ = _ctx(sessions)
 
-    q1 = _query(f"v:{place.id}:m")
+    q1 = _query(f"v:{place.id}:m", place_ids=[place.id])
     await votes.on_callback(SimpleNamespace(callback_query=q1, effective_chat=q1.message.chat), ctx)
-    assert _must_label(q1) == "✅ Must 1"
+    assert _must_label(q1) == "1 ✅1"
     q1.answer.assert_awaited_once_with("Voted Must-go")
 
-    q2 = _query(f"v:{place.id}:m")  # same tap again
+    q2 = _query(f"v:{place.id}:m", place_ids=[place.id])  # same tap again
     await votes.on_callback(SimpleNamespace(callback_query=q2, effective_chat=q2.message.chat), ctx)
-    assert _must_label(q2) == "✅ Must 0"
+    assert _must_label(q2) == "1 ✅0"
     q2.answer.assert_awaited_once_with("Vote removed")
 
 
@@ -113,16 +119,14 @@ async def test_wrong_place_clears_the_pin(sessions):
             confidence="low",
         )
     ctx, _ = _ctx(sessions)
-    q = _query(f"w:{place.id}")
+    q = _query(f"w:{place.id}", place_ids=[place.id])
     await votes.on_callback(SimpleNamespace(callback_query=q, effective_chat=q.message.chat), ctx)
     q.answer.assert_awaited_once_with("Pin removed")
     with sessions() as s:
         saved = pq.get_place(s, place.id)
     assert (saved.lat, saved.lng, saved.confidence) == (None, None, "none")
-    text = q.edit_message_text.await_args.args[0]
-    assert text.endswith("❌ Pin removed")
-    markup = q.edit_message_text.await_args.kwargs["reply_markup"]
-    assert len(markup.inline_keyboard) == 1  # only the vote row is left
+    markup = q.edit_message_reply_markup.await_args.args[0]
+    assert len(markup.inline_keyboard[0]) == 3  # the 👎📍 button is gone from that row
 
 
 def _failed_source(sessions, status="failed"):
@@ -160,3 +164,16 @@ async def test_retry_on_finished_link_does_nothing(sessions):
     )
     query.answer.assert_awaited_once_with("Nothing to retry.")
     assert tasks == []
+
+
+async def test_vote_keeps_every_place_on_the_message(sessions):
+    # One message lists several places: a vote must redraw all rows, in order (#49).
+    first = _place(sessions)
+    with sessions() as s:
+        second = pq.add_place(s, first.trip_id, name="Butagumi", category="x", video_note="")
+    ctx, _ = _ctx(sessions)
+    q = _query(f"v:{second.id}:s", place_ids=[first.id, second.id])
+    await votes.on_callback(SimpleNamespace(callback_query=q, effective_chat=q.message.chat), ctx)
+    rows = q.edit_message_reply_markup.await_args.args[0].inline_keyboard
+    assert [r[0].text for r in rows] == ["1 ✅0", "2 ✅0"]
+    assert rows[1][2].text == "❌1"
