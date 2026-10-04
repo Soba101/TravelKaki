@@ -12,7 +12,7 @@ from travelkaki.bot.handlers import WELCOME_TEXT, start
 async def test_start_replies_with_welcome_and_privacy_notice():
     # Fake update: only the parts our handler touches.
     message = SimpleNamespace(reply_text=AsyncMock())
-    update = SimpleNamespace(effective_message=message)
+    update = SimpleNamespace(effective_message=message, effective_chat=SimpleNamespace(id=1))
 
     await start(update, context=None)
 

@@ -4,8 +4,12 @@ A handler is an async function that Telegram calls when a matching
 message arrives. Each one gets `update` (the message) and `context`.
 """
 
+import logging
+
 from telegram import Update
 from telegram.ext import ContextTypes
+
+log = logging.getLogger(__name__)
 
 # Shown on /start. Issue #3 asks that it clearly states what we store.
 # Keep this in sync with the Privacy section of README.md.
@@ -22,5 +26,7 @@ WELCOME_TEXT = (
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Reply to /start with the welcome + privacy notice."""
+    # One log line per command: chat id only, never the message text (#3 follow-up).
+    log.info("start chat=%s", update.effective_chat.id)
     # effective_message works for normal chats, groups and edited messages.
     await update.effective_message.reply_text(WELCOME_TEXT)
