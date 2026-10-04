@@ -28,7 +28,11 @@ class Extraction(BaseModel):
     places: list[ExtractedPlace]
 
 
+# The JSON schema sent to the LLM. Every field is marked required here, so the model
+# always fills them in, while the pydantic defaults above keep *parsing* lenient.
+# (Without this, the model skipped "category" and every card said "place".)
 SCHEMA = Extraction.model_json_schema()
+SCHEMA["$defs"]["ExtractedPlace"]["required"] = list(ExtractedPlace.model_fields)
 
 # Tested on qwen3:4b-instruct (tests/test_live.py). The "stall inside a market" line was
 # added after it missed a pepper-bun stall inside Raohe night market.

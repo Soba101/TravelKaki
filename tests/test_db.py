@@ -47,3 +47,16 @@ def test_mark_interrupted(sessions):
 def test_make_engine_creates_sqlite_folder(tmp_path):
     make_engine(f"sqlite:///{tmp_path}/x/y.db")
     assert (tmp_path / "x").is_dir()
+
+
+def test_vote_toggle(sessions):
+    from travelkaki.db import place_queries as pq
+
+    with sessions() as s:
+        trip = queries.upsert_trip(s, chat_id=1, city="Tokyo", start=None, end=None, hotel=None)
+        place = pq.add_place(s, trip.id, name="Ichiran", category="ramen", video_note="")
+        assert pq.vote(s, place.id, 7, "must") == pq.VoteCounts(1, 0, 0)
+        assert pq.vote(s, place.id, 7, "must") == pq.VoteCounts(0, 0, 0)  # same tap removes
+        assert pq.vote(s, place.id, 7, "skip") == pq.VoteCounts(0, 0, 1)
+        assert pq.vote(s, place.id, 8, "must") == pq.VoteCounts(1, 0, 1)  # another person
+        assert pq.places_with_counts(s, trip.id) == [(place, pq.VoteCounts(1, 0, 1))]

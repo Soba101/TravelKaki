@@ -5,10 +5,18 @@ Building does NOT connect to Telegram. Starting/stopping happens in
 """
 
 from telegram import BotCommand
-from telegram.ext import Application, CommandHandler
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
 
-from travelkaki.bot.handlers import start
+from travelkaki.bot.handlers import on_error, start
+from travelkaki.bot.links import add_command, on_message
 from travelkaki.bot.trip import newtrip
+from travelkaki.bot.votes import on_callback, places_command
 from travelkaki.deps import Deps
 
 # The command menu users see when they type "/". Set from code at startup,
@@ -21,17 +29,35 @@ COMMANDS = [
 ]
 
 
+# New messages only (by default PTB also runs commands again when they're edited).
+NEW_ONLY = filters.UpdateType.MESSAGE
+
+
 def build_application(token: str, deps: Deps | None = None) -> Application:
     """Create the bot app for this token, with all handlers added.
 
     `deps` (database, HTTP client, LLM, ...) is stored in bot_data so every
     handler can reach it as context.bot_data["deps"].
     """
-    app = Application.builder().token(token).build()
+    # 20 s timeouts (default 5 s): sends timed out in the PR3 demo while the Mac was busy
+    # running the local LLM, and a place card was lost.
+    app = Application.builder().token(token).read_timeout(20).write_timeout(20).build()
     app.bot_data["deps"] = deps
-    # One line per command.
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("newtrip", newtrip))
+    # One line per command. NEW_ONLY: editing a command must not run it again (PR3 review).
+    app.add_handler(CommandHandler("start", start, filters=NEW_ONLY))
+    app.add_handler(CommandHandler("newtrip", newtrip, filters=NEW_ONLY))
+    app.add_handler(CommandHandler("add", add_command, filters=NEW_ONLY))
+    app.add_handler(CommandHandler("places", places_command, filters=NEW_ONLY))
+    app.add_handler(CallbackQueryHandler(on_callback))  # vote / wrong place / retry buttons
+    app.add_error_handler(on_error)  # never silent, even when a handler crashes
+    # Every other new message with text or a caption (photos/videos with links too).
+    # UpdateType.MESSAGE = new messages only: an edit must not read a link twice.
+    app.add_handler(
+        MessageHandler(
+            filters.UpdateType.MESSAGE & (filters.TEXT | filters.CAPTION) & ~filters.COMMAND,
+            on_message,
+        )
+    )
     return app
 
 

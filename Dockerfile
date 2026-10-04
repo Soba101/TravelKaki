@@ -20,6 +20,9 @@ RUN uv sync --frozen --no-dev
 
 # 2) Then copy the app code.
 COPY travelkaki ./travelkaki
+# Make the code readable by the non-root app user, whatever the file modes were on
+# the build machine (an owner-only file once crashed the bot at startup).
+RUN chmod -R a+rX /app/travelkaki
 
 # Run as a normal user, not root.
 RUN useradd --create-home app

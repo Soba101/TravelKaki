@@ -53,6 +53,12 @@ def canonical(url: str) -> tuple[str, Platform] | None:
     return None
 
 
+def is_platform_host(url: str) -> bool:
+    """True for any tiktok.com / instagram.com link (post or not)."""
+    host = _host(_with_scheme(url))
+    return host.endswith("tiktok.com") or host == "instagram.com"
+
+
 def needs_redirect(url: str) -> bool:
     """True for short/share links that must be opened to find the real post."""
     url = _with_scheme(url)
@@ -68,7 +74,7 @@ async def resolve(url: str, client: httpx.AsyncClient) -> str:
     """Follow redirects and return the final URL. Raises LinkError on failure."""
     try:
         response = await client.get(url, follow_redirects=True, timeout=10)
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, httpx.InvalidURL) as e:  # InvalidURL isn't an HTTPError
         raise LinkError(str(e)) from e
     return str(response.url)
 
