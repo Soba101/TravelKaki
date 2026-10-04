@@ -54,6 +54,9 @@ class Trip(Base):
     end_date: Mapped[date | None]
     hotel: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[datetime] = mapped_column(default=_now)
+    # M2: the hotel's map pin, found once when /plan runs. Days start and end here.
+    hotel_lat: Mapped[float | None]
+    hotel_lng: Mapped[float | None]
 
 
 class Source(Base):
@@ -86,6 +89,9 @@ class Place(Base):
     video_note: Mapped[str] = mapped_column(default="")  # what the post says about it
     confidence: Mapped[str] = mapped_column(String(10), default=Confidence.none)
     created_at: Mapped[datetime] = mapped_column(default=_now)
+    # M2: raw OSM opening hours, e.g. "Mo-Fr 10:00-22:00".
+    # None = never checked. "" = checked, but OSM has no hours for it.
+    opening_hours: Mapped[str | None]
 
 
 class PlaceSource(Base):
@@ -114,3 +120,50 @@ class LlmUsage(Base):
     trip_id: Mapped[int] = mapped_column(ForeignKey("trip.id"), primary_key=True)
     day: Mapped[date] = mapped_column(primary_key=True)
     calls: Mapped[int] = mapped_column(default=0)
+
+
+# ---- M2: the planner (spec: docs/superpowers/specs/2026-10-05-m2-planner-agent-design.md) ----
+
+
+class Itinerary(Base):
+    """One saved plan. Each /plan run makes a new version (old ones are kept)."""
+
+    __tablename__ = "itinerary"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    trip_id: Mapped[int] = mapped_column(ForeignKey("trip.id"))
+    version: Mapped[int]
+    run_id: Mapped[str] = mapped_column(String(36))  # links to the AgentTrace rows
+    used_ai: Mapped[bool]  # False = the code-only fallback made it
+    tradeoffs: Mapped[str] = mapped_column(default="")  # the agent's short summary
+    window: Mapped[str] = mapped_column(String(20))  # "flex" or e.g. "10-22"
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class ItineraryItem(Base):
+    """One stop in a plan. Times are minutes from midnight (00:30 next day = 1470)."""
+
+    __tablename__ = "itinerary_item"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    itinerary_id: Mapped[int] = mapped_column(ForeignKey("itinerary.id"))
+    day: Mapped[date]
+    order: Mapped[int]
+    place_id: Mapped[int] = mapped_column(ForeignKey("place.id"))
+    start_min: Mapped[int]
+    end_min: Mapped[int]
+    travel_minutes: Mapped[int]  # travel from the previous stop (or the hotel)
+
+
+class AgentTrace(Base):
+    """One step of a planner run: an LLM call or a tool call. Feeds the M5 eval."""
+
+    __tablename__ = "agent_trace"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    trip_id: Mapped[int] = mapped_column(ForeignKey("trip.id"))
+    run_id: Mapped[str] = mapped_column(String(36))  # one uuid per /plan run
+    step: Mapped[int]
+    kind: Mapped[str] = mapped_column(String(10))  # "llm" or "tool"
+    tool: Mapped[str | None] = mapped_column(String(50))
+    input: Mapped[str] = mapped_column(default="")
+    output: Mapped[str] = mapped_column(default="")
+    tokens: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(default=_now)

@@ -41,7 +41,13 @@ def make_sessions(engine: Engine) -> sessionmaker[Session]:
 
 
 def init_db(engine: Engine) -> None:
-    """Create any missing tables. (No migrations until we go public.)"""
+    """Create any missing tables, then add any missing columns.
+
+    (No Alembic until we go public. db/migrate.py adds new nullable columns,
+    so the live database keeps its data when a new version adds fields. M2.)
+    """
     from travelkaki.db import models  # noqa: F401  (import registers the tables)
+    from travelkaki.db.migrate import add_missing_columns
 
     Base.metadata.create_all(engine)
+    add_missing_columns(engine)

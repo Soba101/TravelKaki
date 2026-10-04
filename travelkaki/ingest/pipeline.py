@@ -64,6 +64,9 @@ async def _save(
         center = (trip.city_lat, trip.city_lng) if trip.city_lat is not None else None
         hit, confidence = await deps.geo.locate(ex.name, trip.city, center)
     lat, lng, address = (hit.lat, hit.lng, hit.address) if hit else (None, None, None)
+    # M2: keep OSM opening hours for the planner. "" = we checked, OSM has none.
+    # No pin = never checked (None); /plan fetches hours later if a pin is added.
+    hours = (hit.opening_hours or "") if hit else None
     with deps.sessions() as s:
         same = find_duplicate(ex.name, lat, lng, pq.trip_places(s, trip.id))
         if same is not None:  # already saved: just remember this post mentions it too
@@ -80,6 +83,7 @@ async def _save(
             lng=lng,
             address=address,
             confidence=confidence,
+            opening_hours=hours,
         )
         if source_id is not None:
             pq.link_source(s, place.id, source_id)

@@ -29,6 +29,7 @@ def add_place(
     lng: float | None = None,
     address: str | None = None,
     confidence: str = Confidence.none,
+    opening_hours: str | None = None,  # M2: None = not checked, "" = checked, none
 ) -> Place:
     place = Place(
         trip_id=trip_id,
@@ -39,6 +40,7 @@ def add_place(
         lng=lng,
         address=address,
         confidence=confidence,
+        opening_hours=opening_hours,
     )
     s.add(place)
     s.commit()

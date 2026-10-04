@@ -104,3 +104,24 @@ async def test_locate_without_city_center_is_low():
     geo, _ = _geo(_router(None, (35.66, 139.70)))
     _, conf = await geo.locate("Ichiran", "Tokyo", None)
     assert conf == "low"
+
+
+async def test_search_reads_opening_hours():
+    """M2: we ask Nominatim for extra tags and keep the OSM opening hours."""
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        hit = {"lat": "35.6", "lon": "139.7", "display_name": "X"}
+        hit["extratags"] = {"opening_hours": "Mo-Su 10:00-20:00"}
+        return httpx.Response(200, json=[hit])
+
+    geo, _ = _geo(handler)
+    result = await geo.search("teamLab, Tokyo")
+    assert result.opening_hours == "Mo-Su 10:00-20:00"
+    assert requests[0].url.params["extratags"] == "1"
+
+
+async def test_missing_extratags_is_none():
+    geo, _ = _geo(lambda request: _hit(35.6, 139.7))
+    assert (await geo.search("Somewhere, Tokyo")).opening_hours is None

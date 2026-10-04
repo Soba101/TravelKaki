@@ -13,8 +13,9 @@ from travelkaki.llm.client import LlmUnavailable
 class FakeGeo:
     """locate() always returns the same pin + confidence."""
 
-    def __init__(self, lat=35.66, lng=139.70, confidence="high"):
-        self.answer = (GeoResult(lat, lng, "1-2 Shibuya"), confidence) if lat else (None, "none")
+    def __init__(self, lat=35.66, lng=139.70, confidence="high", hours=None):
+        hit = GeoResult(lat, lng, "1-2 Shibuya", opening_hours=hours)
+        self.answer = (hit, confidence) if lat else (None, "none")
 
     async def locate(self, name, city, center):
         return self.answer
@@ -180,3 +181,25 @@ async def test_only_card_places_are_geocoded(sessions):
     with sessions() as s:
         unpinned = [p for p in s.query(Place).all() if p.lat is None]
     assert len(unpinned) == 2
+
+
+async def _saved_hours(sessions, geo):
+    _, source = make_source(sessions)
+    deps = make_deps(sessions, FakeLlm(places_answer("teamLab")))
+    deps.geo = geo
+    await pipeline.run(source.id, deps)
+    with sessions() as s:
+        return s.scalar(select(Place.opening_hours))
+
+
+async def test_pinned_place_stores_hours(sessions):
+    """M2: hours from the geocoder are saved. "" = checked, none. None = not checked."""
+    assert await _saved_hours(sessions, FakeGeo(hours="Mo-Su 10:00-20:00")) == "Mo-Su 10:00-20:00"
+
+
+async def test_pinned_place_without_hours_stores_empty(sessions):
+    assert await _saved_hours(sessions, FakeGeo(hours=None)) == ""
+
+
+async def test_unpinned_place_has_no_hours(sessions):
+    assert await _saved_hours(sessions, FakeGeo(lat=None)) is None

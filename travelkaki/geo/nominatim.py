@@ -31,6 +31,8 @@ class GeoResult:
     lat: float
     lng: float
     address: str
+    # M2: raw OSM opening hours ("Mo-Fr 10:00-22:00"), when OSM has them.
+    opening_hours: str | None = None
 
 
 class Nominatim:
@@ -54,7 +56,8 @@ class Nominatim:
         key = (query, box)
         if key in self._cache:
             return self._cache[key]
-        params = {"q": query, "format": "jsonv2", "limit": 1}
+        # extratags=1 also returns OSM tags like opening_hours (M2 planner).
+        params = {"q": query, "format": "jsonv2", "limit": 1, "extratags": 1}
         if box:
             params |= {"viewbox": ",".join(str(x) for x in box), "bounded": 1}
         async with self._lock:
@@ -73,11 +76,13 @@ class Nominatim:
                 return None  # not cached: a later try may work
             finally:
                 self._last = self._clock()
-        result = (
-            GeoResult(float(hits[0]["lat"]), float(hits[0]["lon"]), hits[0]["display_name"])
-            if hits
-            else None
-        )
+        result = None
+        if hits:
+            top = hits[0]
+            tags = top.get("extratags") or {}  # can be null in Nominatim's answer
+            result = GeoResult(
+                float(top["lat"]), float(top["lon"]), top["display_name"], tags.get("opening_hours")
+            )
         self._cache[key] = result
         return result
 
