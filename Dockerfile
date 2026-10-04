@@ -23,6 +23,9 @@ COPY travelkaki ./travelkaki
 
 # Run as a normal user, not root.
 RUN useradd --create-home app
+# SQLite lives in /app/data (a volume in docker-compose). The app user must own it,
+# or the database can't be created. (M1, issue #6.)
+RUN mkdir -p /app/data && chown app /app/data
 USER app
 
 EXPOSE 8000

@@ -16,6 +16,8 @@ dependencies = [
     "sqlalchemy>=2.0",            # database layer (used from M1)
     "litellm>=1.50",              # one client for many LLM providers (used from M1)
     "pydantic-settings>=2.4",     # reads settings from .env
+    "httpx>=0.27",                # HTTP client: TikTok oEmbed, short-link redirects, Nominatim (M1)
+    "yt-dlp>=2026.8",             # reads Instagram post captions (metadata only, no download) (M1)
 ]
 
 [dependency-groups]
@@ -23,7 +25,6 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",  # lets pytest run async test functions
-    "httpx>=0.27",           # needed by FastAPI's TestClient
     "ruff>=0.6",             # linter + formatter
 ]
 
@@ -42,3 +43,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"  # async tests run without needing a decorator on each one
+# Live tests call a real local LLM (Ollama). They are skipped by default and in CI.
+# Run them on your Mac with:  uv run pytest -m live
+addopts = "-m 'not live'"
+markers = ["live: needs a real local LLM (Ollama); skipped unless run with -m live"]
