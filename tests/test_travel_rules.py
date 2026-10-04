@@ -65,3 +65,9 @@ def test_window_label():
     assert Window().label() == "flex"
     assert Window(600, 1320, fixed=True).label() == "10-22"
     assert Window(1080, 1560, fixed=True).label() == "18-2"
+
+
+def test_estimate_express_for_long_trips():
+    """Donovan: far places are reachable by express train/bus or taxi.
+    ~30 km straight x 1.3 = 39 km at 40 km/h = 59 min + 15 = 74 min."""
+    assert estimate(A, (A[0] + 0.27, A[1])) == (74, "express")

@@ -92,10 +92,12 @@ def test_more_days_than_places():
     assert sum(1 for d in plan.days if not d.stops) == 2
 
 
-def test_far_place_is_not_planned_with_long_transfer():
-    far = place(2, 36.30, 139.70)  # ~70 km away
+def test_too_far_from_other_stops_is_dropped():
+    """Between stops the 60-min rule still holds: a far place can't follow a city stop
+    on a 1-day trip, so one of them is dropped with a reason."""
+    far = place(2, 36.30, 139.70, tier="maybe")  # ~68 km away
     plan = build_days(make_input([place(1), far], days=1))
-    assert all(s.travel <= 60 for d in plan.days for s in d.stops)
+    assert all(s.travel <= 60 for s in plan.days[0].stops[1:])
     assert [d.place_id for d in plan.dropped] == [2]
 
 
@@ -143,3 +145,24 @@ def test_24_7_place_after_midnight_is_planned():
     karaoke = place(2, 35.6905, 139.70, category="karaoke club", hours="24/7", visit=60)
     plan = build_days(make_input([bar, karaoke], days=1))
     assert planned_ids(plan)[1] == [1, 2]
+
+
+def test_day_trip_gets_its_own_day():
+    """Donovan: a far Must-go (e.g. ~70 km away) is a day trip, not dropped.
+    The first stop of a day may be up to 3 h from the hotel."""
+    from travelkaki.planner.validate import savable, validate
+
+    far = place(9, 36.30, 139.70)  # ~68 km north
+    city = [place(1), place(2, 35.692, 139.70)]
+    inp = make_input(city + [far], days=2)
+    plan = build_days(inp)
+    ids = planned_ids(plan)
+    assert [9] in ids.values()  # alone on its own day
+    assert savable(plan, validate(plan, inp))
+
+
+def test_far_place_goes_first_on_its_day():
+    far = place(9, 36.30, 139.70)
+    near_far = place(8, 36.302, 139.70)
+    plan = build_days(make_input([far, near_far], days=1))
+    assert planned_ids(plan)[1][0] in (8, 9) and len(planned_ids(plan)[1]) == 2

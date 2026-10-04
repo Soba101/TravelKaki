@@ -8,13 +8,13 @@ Pure code. Returns a list of Issues. A plan is **valid** when it has no
 | skip_included | error   | a Skip place is in the plan                           |
 | closed        | error   | known hours say it's closed at the planned time       |
 | day_too_long  | error   | ends after the day's latest end, or busy > 12 h       |
-| long_transfer | error   | a trip over 60 min                                    |
+| long_transfer | error   | a hop over 60 min (a day's first trip: over 3 h)      |
 | hours_unknown | warning | no hours for a planned place                          |
 | meal_time     | warning | food places on the day, but none at lunch/dinner time |
 | no_hotel_pin  | warning | days start from the city centre                       |
 """
 
-from travelkaki.planner.fit import MAX_TRANSFER, hhmm, limits
+from travelkaki.planner.fit import MAX_DAY_TRIP, MAX_TRANSFER, hhmm, limits
 from travelkaki.planner.hours import open_through, parse
 from travelkaki.planner.rules import is_food
 from travelkaki.planner.travel import estimate
@@ -32,12 +32,12 @@ def _check_day(n: int, day, inp: PlanInput) -> list[Issue]:
     """All the per-stop and per-day rules for day number n (1-based)."""
     out = []
     places = [inp.place(s.place_id) for s in day.stops]
-    for stop, p in zip(day.stops, places, strict=True):
+    for k, (stop, p) in enumerate(zip(day.stops, places, strict=True)):
         if p is None:  # not a planned place: it was voted Skip
             text = f"Place {stop.place_id} was voted Skip but is in the plan"
             out.append(Issue("error", "skip_included", text, stop.place_id, n))
             continue
-        if stop.travel > MAX_TRANSFER:
+        if stop.travel > (MAX_TRANSFER if k else MAX_DAY_TRIP):  # first trip may be a day trip
             text = f"{stop.travel} min trip to {p.name} on Day {n}"
             out.append(Issue("error", "long_transfer", text, p.id, n))
         wd = day.date.weekday()

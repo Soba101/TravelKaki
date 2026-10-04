@@ -27,7 +27,8 @@ the go, editing a plan by hand, planner eval (#32, M5).
 | Tier rule | `skip` if skips > musts + maybes. `must` if musts ≥ 1. Else `maybe`. | Simple, explainable. |
 | Opening hours | OSM `opening_hours` via Nominatim `extratags=1`. Small parser for common forms. Unknown = warning. | Free. Enough for the "closed on Monday" demo. |
 | Hotel | Geocoded at `/plan` (once, stored). Days start and end there. No hotel → city centre. | Realistic routes. |
-| Travel | Straight line × 1.3. < 1.5 km walk at 4.5 km/h. Else transit: 20 km/h + 10 min. | Matches the v1 design ("distance × speed factor"). |
+| Travel | Straight line × 1.3. < 1.5 km walk at 4.5 km/h. < 15 km transit: 20 km/h + 10 min. ≥ 15 km express (train, express bus or taxi): 40 km/h + 15 min. | Matches the v1 design ("distance × speed factor"). Express added after PR1 (Donovan: far places work by express bus; not everyone uses public transport). |
+| Day trips | A day's first stop may be up to 3 h from the hotel; far places go first on their day. Hops between stops stay ≤ 60 min. | Donovan, after PR1: Disneyland-style Must-gos shouldn't be dropped. |
 | Day window | Flexible by default (see below). `/plan 10-22` sets fixed hours. | Donovan: "let the user choose or based on the day activities". |
 | No dates | Reply with how to set them. Max 14 days. | Can't plan days without dates. |
 | DB changes | `db/migrate.py` adds missing nullable columns (`ALTER TABLE ADD COLUMN`). Still no Alembic. | `create_all` can't add columns to the live DB. Also unblocks `Source.author` (#48). |
@@ -119,7 +120,7 @@ Returns a list of `Issue(level, code, place_id, day, text)`. **Valid** = no `err
 | `skip_included` | error | A skip place is in the plan |
 | `closed` | error | Known hours say it's closed at the planned time |
 | `day_too_long` | error | Ends after the window's latest end, or busy span > 12 h |
-| `long_transfer` | error | A transfer > 60 min |
+| `long_transfer` | error | A hop between stops > 60 min, or a day's first trip > 3 h |
 | `hours_unknown` | warning | No hours for a planned place |
 | `meal_time` | warning | Day has food places but none in 11:00–14:30 or 17:30–21:30 |
 | `no_hotel_pin` | warning | The base point is the city centre |

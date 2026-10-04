@@ -6,6 +6,9 @@ Rules (M2 spec, "build_days" steps 4-5):
   60 min (the first stop may wait longer: the day just starts later).
   Otherwise try it later in the day. Still impossible -> dropped, with a reason.
 - A transfer over 60 min, or a day running past its end, also drops the place.
+- Day trips: the FIRST stop may be up to 3 h from the hotel (express train,
+  bus or taxi), so far places come first on their day. Hops between stops
+  stay under 60 min. (Donovan's call, after PR1.)
 """
 
 from datetime import date
@@ -17,7 +20,8 @@ from travelkaki.planner.travel import estimate
 from travelkaki.planner.types import EVENING_END, MAX_SPAN, Day, Dropped, PlanPlace, Stop, Window
 
 MAX_WAIT = 60  # minutes we'll wait for a place to open
-MAX_TRANSFER = 60  # minutes; longer trips break the validator's rule
+MAX_TRANSFER = 60  # minutes between stops; longer trips break the validator's rule
+MAX_DAY_TRIP = 180  # minutes from the hotel to a day's first stop (a day trip)
 
 
 def day_label(d: date) -> str:
@@ -26,9 +30,12 @@ def day_label(d: date) -> str:
 
 
 def order(places: list[PlanPlace], base: tuple[float, float]) -> list[PlanPlace]:
-    """Nearest neighbour from the base. Evening places are visited last."""
+    """Nearest neighbour from the base. Far (day-trip) places first, evening places last."""
+    far = [p for p in places if estimate(base, p.point)[0] > MAX_TRANSFER]
+    late = [p for p in places if is_evening(p) and p not in far]
+    rest = [p for p in places if p not in far and p not in late]
     out, cur = [], base
-    for group in ([p for p in places if not is_evening(p)], [p for p in places if is_evening(p)]):
+    for group in (far, rest, late):
         left = list(group)
         while left:
             nxt = min(left, key=lambda p: (distance_m(cur, p.point), p.id))
@@ -76,8 +83,13 @@ def fit_day(
     while queue:
         p = queue.pop(0)
         travel, mode = estimate(cur, p.point)
-        if travel > MAX_TRANSFER:
-            dropped.append(Dropped(p.id, p.name, f"over {MAX_TRANSFER} min from the other stops"))
+        if travel > (MAX_TRANSFER if stops else MAX_DAY_TRIP):
+            where = (
+                f"over {MAX_TRANSFER} min from the other stops"
+                if stops
+                else "too far for a day trip"
+            )
+            dropped.append(Dropped(p.id, p.name, where))
             continue
         arrive = _open_at(p, d.weekday(), t + travel, first=not stops)
         if arrive is None:
