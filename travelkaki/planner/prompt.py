@@ -5,6 +5,9 @@ Tool arguments are tiny on purpose (ids and day numbers), so the model can't
 get lost in big JSON.
 """
 
+from travelkaki.planner.fit import day_label, hhmm
+from travelkaki.planner.types import Plan, PlanInput
+
 SYSTEM_PROMPT = """You plan a group trip, day by day, using tools.
 
 Goal: a plan with every Must-go place in it, if that is possible.
@@ -23,7 +26,8 @@ Rules:
 - Never include places voted Skip (they are not in the list).
 - Must-go places matter most. Maybe places only if there is time.
 - If two Must-go places compete and no plan fits both, you may ask the group
-  with ask_group (if you have it). Ask at most twice.
+  with ask_group (if you have it). Ask at most twice. Then call build_days again
+  with the group's choice (exclude the place that lost), validate and save.
 - You have at most 8 rounds. Always finish with save_plan, as a real tool call."""
 
 
@@ -62,3 +66,26 @@ ASK_TOOL = _fn(
     {"question": {"type": "string"}, "options": {"type": "array", "items": {"type": "string"}}},
     ["question", "options"],
 )
+
+
+def plan_summary(plan: Plan, inp: PlanInput) -> str:
+    """Short text form of a plan for the model: one line per day + dropped places."""
+    names = {p.id: p.name for p in inp.places}
+    lines = []
+    for n, day in enumerate(plan.days, start=1):
+        stops = ", ".join(f"{names.get(s.place_id, s.place_id)} {hhmm(s.start)}" for s in day.stops)
+        lines.append(f"Day {n} ({day_label(day.date)}): {stops or 'free day'}")
+    if plan.dropped:
+        lines.append("Dropped: " + "; ".join(f"{d.name} ({d.reason})" for d in plan.dropped))
+    return "\n".join(lines)
+
+
+def left_out_hint(reason: str, n_days: int, can_ask: bool) -> str:
+    """The one next step that can help a left-out Must-go (small models need it; live runs)."""
+    if reason.startswith("closed on") and n_days > 1:
+        return " - pin it to another day, or accept it"
+    # Only when it lost its slot to other Must-gos: a vote can't fix "too far",
+    # "closed", or a place the group already voted out. (PR3 review #3)
+    if can_ask and reason.startswith(("no time left", "closed whenever")):
+        return " - it competes with other Must-gos: you may ask_group which one to keep"
+    return ""

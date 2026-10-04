@@ -7,16 +7,20 @@ ids as strings, lists instead of objects, made-up tools.)
 
 import json
 import re
+import time
 from dataclasses import dataclass, field
 
+from travelkaki.planner.ask import poll_problem
 from travelkaki.planner.build import build_days
-from travelkaki.planner.fit import day_label, hhmm
+from travelkaki.planner.fit import day_label
 from travelkaki.planner.hours import is_open, parse
+from travelkaki.planner.prompt import left_out_hint, plan_summary
 from travelkaki.planner.travel import estimate
 from travelkaki.planner.types import Issue, Plan, PlanInput, Priorities
 from travelkaki.planner.validate import savable, validate
 
 MAX_TRADEOFF_CHARS = 400
+MAX_POLLS = 2  # ask_group calls per plan
 
 
 class ToolError(Exception):
@@ -33,7 +37,8 @@ class ToolState:
     saved: bool = False
     tradeoffs: str = ""
     polls: int = 0  # ask_group calls so far
-    ask: object = None  # async (question, options) -> {option: votes}; set in PR3
+    ask: object = None  # async (question, options) -> {option: votes}; None = no polls
+    poll_seconds: float = 0.0  # time spent waiting for polls (not counted as LLM time)
 
 
 def _int(value, what: str) -> int:
@@ -55,18 +60,6 @@ def _day(st: ToolState, value) -> int:
     if not 1 <= day <= len(st.inp.dates):
         raise ToolError(f"day must be 1 to {len(st.inp.dates)}")
     return day
-
-
-def plan_summary(plan: Plan, inp: PlanInput) -> str:
-    """Short text form of a plan for the model: one line per day + dropped places."""
-    names = {p.id: p.name for p in inp.places}
-    lines = []
-    for n, day in enumerate(plan.days, start=1):
-        stops = ", ".join(f"{names.get(s.place_id, s.place_id)} {hhmm(s.start)}" for s in day.stops)
-        lines.append(f"Day {n} ({day_label(day.date)}): {stops or 'free day'}")
-    if plan.dropped:
-        lines.append("Dropped: " + "; ".join(f"{d.name} ({d.reason})" for d in plan.dropped))
-    return "\n".join(lines)
 
 
 def _list_places(st: ToolState, args: dict) -> str:
@@ -132,7 +125,8 @@ def _validate(st: ToolState, args: dict) -> str:
     for i in st.issues:
         if i.code == "missing_must" and i.place_id in dropped:
             d = dropped[i.place_id]
-            hint = " - pin it to another day, or accept it" if "closed" in d.reason else ""
+            can_ask = st.ask is not None and st.polls < MAX_POLLS
+            hint = left_out_hint(d.reason, len(st.inp.dates), can_ask)
             lines.append(f"left out: {d.name} ({d.reason}){hint}")
         else:
             lines.append(f"{i.level} {i.code}: {i.text}")
@@ -157,8 +151,24 @@ def _save(st: ToolState, args: dict) -> str:
 
 
 async def _ask(st: ToolState, args: dict) -> str:
-    """Group polls arrive in PR3 (#20). Until then the tool isn't offered."""
-    raise ToolError("ask_group is not available")
+    """Post a poll in the group and return the votes as JSON (#20)."""
+    if st.ask is None:
+        raise ToolError("ask_group is not available")
+    if st.polls >= MAX_POLLS:
+        return "limit reached, decide yourself"
+    question, options = args.get("question"), args.get("options")
+    problem = poll_problem(question, options)
+    if problem:
+        raise ToolError(problem)
+    st.polls += 1
+    started = time.monotonic()
+    try:
+        votes = await st.ask(question.strip(), [o.strip() for o in options])
+    except Exception as e:  # noqa: BLE001 - Telegram trouble: tell the model, keep planning
+        raise ToolError(f"couldn't post the poll ({type(e).__name__}), decide yourself") from e
+    finally:
+        st.poll_seconds += time.monotonic() - started  # the LLM's clock pauses for polls
+    return json.dumps(votes)
 
 
 SYNC_TOOLS = {

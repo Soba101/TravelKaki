@@ -154,3 +154,42 @@ async def test_slow_model_hits_the_overall_time_limit(sessions, monkeypatch):
     deps, inp = _setup(sessions, SlowLlm())
     result = await run_planner(deps, inp, "run-1")
     assert not result.used_ai and result.plan == build_days(inp)
+
+
+async def test_poll_time_does_not_count_toward_the_llm_limit(sessions, monkeypatch):
+    """PR3 review #2: the LLM has its own time budget; waiting for a poll pauses it."""
+    import asyncio
+
+    import travelkaki.planner.loop as loop_module
+
+    async def slow_poll(question, options):
+        await asyncio.sleep(0.3)  # longer than the LLM budget below
+        return {"A": 1}
+
+    monkeypatch.setattr(loop_module, "AGENT_TIMEOUT", 0.2)
+    ask_call = tool_reply(("ask_group", {"question": "Which?", "options": ["A", "B"]}))
+    llm = FakeToolLlm([ask_call] + GOOD_RUN[1:])
+    deps, inp = _setup(sessions, llm)
+    result = await run_planner(deps, inp, "run-1", ask=slow_poll)
+    assert result.used_ai
+
+
+async def test_slow_model_with_polls_still_falls_back_fast(sessions, monkeypatch):
+    """PR3 review #2: offering polls must not stretch a hung model's wait to 14 min."""
+    import asyncio
+    import time
+
+    import travelkaki.planner.loop as loop_module
+
+    class SlowLlm:
+        async def chat_tools(self, messages, tools, on_call):
+            await asyncio.sleep(3)
+
+    async def ask(question, options):
+        return {}
+
+    monkeypatch.setattr(loop_module, "AGENT_TIMEOUT", 0.05)
+    deps, inp = _setup(sessions, SlowLlm())
+    started = time.monotonic()
+    result = await run_planner(deps, inp, "run-1", ask=ask)
+    assert not result.used_ai and time.monotonic() - started < 1

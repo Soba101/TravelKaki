@@ -3,8 +3,8 @@
 import json
 
 from tests.planner_helpers import make_input, place
-from travelkaki.planner.prompt import ASK_TOOL, SYSTEM_PROMPT, TOOLS
-from travelkaki.planner.tools import ToolState, plan_summary, run_tool
+from travelkaki.planner.prompt import ASK_TOOL, SYSTEM_PROMPT, TOOLS, plan_summary
+from travelkaki.planner.tools import ToolState, run_tool
 
 
 def _state():
@@ -125,3 +125,29 @@ async def test_validate_wording_for_left_out_must_go():
     assert "left out: Place 1 (closed on Tue 15 Dec)" in report
     assert "pin it to another day" in report
     assert report.endswith("savable: yes. Call save_plan now.")
+
+
+def _clash_state(ask=None):
+    """Two Must-go museums that both only fit 13:00-17:00 on a 1-day trip."""
+    a = place(1, 35.6491, 139.78, hours="Mo-Su 13:00-17:00")
+    b = place(2, 35.7188, 139.78, hours="Mo-Su 13:00-17:00")
+    return ToolState(make_input([a, b], days=1, base=(35.68, 139.76)), ask=ask)
+
+
+async def test_clash_hint_suggests_ask_group():
+    """Live run: the model never asked the group about a real Must-go clash, because the
+    hint said 'pin it to another day' on a 1-day trip."""
+
+    async def ask(question, options):
+        return {}
+
+    st = _clash_state(ask)
+    await run_tool("build_days", "{}", st)
+    report = await run_tool("validate", "{}", st)
+    assert "ask_group" in report and "another day" not in report
+
+
+async def test_no_ask_hint_without_polls():
+    st = _clash_state()
+    await run_tool("build_days", "{}", st)
+    assert "ask_group" not in await run_tool("validate", "{}", st)
