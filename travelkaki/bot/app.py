@@ -15,6 +15,7 @@ from telegram.ext import (
 
 from travelkaki.bot.handlers import on_error, start
 from travelkaki.bot.links import add_command, on_message
+from travelkaki.bot.plan import plan_command
 from travelkaki.bot.trip import newtrip
 from travelkaki.bot.votes import on_callback, places_command
 from travelkaki.deps import Deps
@@ -26,6 +27,7 @@ COMMANDS = [
     BotCommand("newtrip", "Start a trip: /newtrip Tokyo 12-15 Dec"),
     BotCommand("add", "Add a link or a place by name"),
     BotCommand("places", "Saved places and votes"),
+    BotCommand("plan", "Plan the days: /plan or /plan 10-22"),  # M2
 ]
 
 
@@ -48,6 +50,7 @@ def build_application(token: str, deps: Deps | None = None) -> Application:
     app.add_handler(CommandHandler("newtrip", newtrip, filters=NEW_ONLY))
     app.add_handler(CommandHandler("add", add_command, filters=NEW_ONLY))
     app.add_handler(CommandHandler("places", places_command, filters=NEW_ONLY))
+    app.add_handler(CommandHandler("plan", plan_command, filters=NEW_ONLY))  # M2 planner
     app.add_handler(CallbackQueryHandler(on_callback))  # vote / wrong place / retry buttons
     app.add_error_handler(on_error)  # never silent, even when a handler crashes
     # Every other new message with text or a caption (photos/videos with links too).
