@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from travelkaki.config import Settings
 from travelkaki.db import queries
 from travelkaki.db.base import init_db, make_engine, make_sessions
+from travelkaki.ingest.captions import fetch_caption
+from travelkaki.llm.client import LlmClient
 
 
 @dataclass
@@ -29,7 +31,7 @@ class Deps:
 
 
 def build_deps(settings: Settings) -> Deps:
-    """Create the real dependencies: database (tables created) and HTTP client."""
+    """Create the real dependencies: database (tables created), HTTP client, LLM."""
     engine = make_engine(settings.database_url)
     init_db(engine)
     sessions = make_sessions(engine)
@@ -39,6 +41,8 @@ def build_deps(settings: Settings) -> Deps:
         sessions=sessions,
         # A browser-like User-Agent: TikTok's oEmbed rejects some default client names.
         http=httpx.AsyncClient(headers={"User-Agent": "Mozilla/5.0 (TravelKaki bot)"}),
+        llm=LlmClient(settings),
+        fetch_caption=fetch_caption,
         daily_cap=settings.llm_daily_cap,
         interrupted=interrupted,
     )
