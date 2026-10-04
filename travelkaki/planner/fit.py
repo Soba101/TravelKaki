@@ -11,7 +11,7 @@ Rules (M2 spec, "build_days" steps 4-5):
 from datetime import date
 
 from travelkaki.geo.distance import distance_m
-from travelkaki.planner.hours import is_open, next_open, parse
+from travelkaki.planner.hours import next_open, open_through, parse
 from travelkaki.planner.rules import is_evening
 from travelkaki.planner.travel import estimate
 from travelkaki.planner.types import EVENING_END, MAX_SPAN, Day, Dropped, PlanPlace, Stop, Window
@@ -53,8 +53,8 @@ def _open_at(p: PlanPlace, weekday: int, arrive: int, first: bool) -> int | None
     start = next_open(p.hours, weekday, arrive)
     if start is None or (not first and start - arrive > MAX_WAIT):
         return None
-    if not is_open(p.hours, weekday, start + p.visit - 1):
-        return None  # it closes before we'd finish
+    if not open_through(p.hours, weekday, start, start + p.visit):
+        return None  # it closes (or takes a break) before we'd finish
     return start
 
 
@@ -69,8 +69,9 @@ def fit_day(
     d: date, day_no: int, places: list[PlanPlace], base: tuple[float, float], window: Window
 ) -> tuple[Day, list[Dropped]]:
     """Give each place a time on day `d`. Returns the Day and what didn't fit."""
-    start, latest, span = limits(window, places)
+    start, _, span = limits(window, places)
     queue, tried_later, stops, dropped = list(places), set(), [], []
+    kept: list[PlanPlace] = []  # places that got a time so far
     t, cur, leave = start, base, None  # leave = when we leave the hotel
     while queue:
         p = queue.pop(0)
@@ -88,12 +89,16 @@ def fit_day(
             continue
         end = arrive + p.visit
         back, _ = estimate(p.point, base)
+        # The late (01:00) end only counts if an evening place is really on the day.
+        # A bar that got dropped must not stretch the day for the others. (Review #1)
+        latest = limits(window, kept + [p])[1]
         begin = leave if leave is not None else arrive - travel
         if end + back > latest or end + back - begin > span:
             dropped.append(Dropped(p.id, p.name, f"no time left on Day {day_no}"))
             continue
         leave = begin
         stops.append(Stop(p.id, arrive, end, travel, mode))
+        kept.append(p)
         t, cur = end, p.point
     return Day(d, stops), dropped
 

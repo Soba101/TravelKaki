@@ -106,3 +106,9 @@ def test_build_days_output_is_savable():
     inp = make_input(places, days=2)
     plan = build_days(inp)
     assert savable(plan, validate(plan, inp))
+
+
+def test_visit_across_a_break_is_closed():
+    """Review #12: open at the start and end isn't enough if it closes in between."""
+    p = place(1, hours="Mo-Su 10:00-14:00,14:30-20:00")  # 2 h museum from 13:00
+    assert "closed" in _codes(validate(_one_stop(p, start=780), make_input([p], days=1)))

@@ -77,15 +77,39 @@ def parse(raw: str | None) -> dict[int, list[tuple[int, int]]] | None:
     return week
 
 
-def is_open(raw: str | None, weekday: int, minute: int) -> bool | None:
-    """Open at this minute? None = unknown. Also checks last night's late hours."""
+def _around(week: dict, weekday: int) -> list[tuple[int, int]]:
+    """Yesterday's, today's and tomorrow's intervals on today's clock, merged.
+
+    Yesterday's 18:00-02:00 becomes (-360, 120). Tomorrow's 00:00-24:00 becomes
+    (1440, 2880). Touching intervals join, so 24/7 is one long open stretch.
+    (Review #5: minutes after midnight must see tomorrow's hours too.)
+    """
+    spans = [(s - 1440, e - 1440) for s, e in week[(weekday - 1) % 7]]
+    spans += week[weekday] + [(s + 1440, e + 1440) for s, e in week[(weekday + 1) % 7]]
+    merged: list[list[int]] = []
+    for s, e in sorted(spans):
+        if merged and s <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
+    return [(s, e) for s, e in merged]
+
+
+def open_through(raw: str | None, weekday: int, start: int, end: int) -> bool | None:
+    """Open for the whole visit from `start` to `end`? None = unknown.
+
+    Checks one unbroken open stretch, so a visit across a lunch break
+    (closed 14:00-14:30) is not open. (Review #12.)
+    """
     week = parse(raw)
     if week is None:
         return None
-    if any(s <= minute < e for s, e in week[weekday]):
-        return True
-    yesterday = week[(weekday - 1) % 7]
-    return any(s <= minute + 1440 < e for s, e in yesterday)
+    return any(s <= start and end <= e for s, e in _around(week, weekday))
+
+
+def is_open(raw: str | None, weekday: int, minute: int) -> bool | None:
+    """Open at this minute? None = unknown. Sees last night's late hours too."""
+    return open_through(raw, weekday, minute, minute + 1)
 
 
 def next_open(raw: str | None, weekday: int, minute: int) -> int | None:

@@ -7,15 +7,18 @@ Priorities (include / exclude / pins); this file does the maths.
 2. Must-gos (and agent "include"s) are grouped by area: k-means on the pins,
    k = number of days, far-apart seeds, 10 rounds. Over-full days give away
    their farthest place to the nearest day with room.
-3. Maybes (most votes first) join the closest day with time left.
 4-5. Each day is ordered and fitted to times (fit.py).
 Repair: a dropped must-go is tried on every other day; the first day where
 everything still fits keeps it.
+3. Only then do Maybes (most votes first) join the closest day that still has
+   time: a Maybe stays only if nothing else on that day gets pushed out.
+   So Must-gos always come first. (Review #2)
+Places the agent excluded are listed as "left out by the planner". (Review #3)
 """
 
 from travelkaki.geo.distance import distance_m
 from travelkaki.planner.fit import fit_day, limits, order
-from travelkaki.planner.types import Dropped, Plan, PlanInput, PlanPlace, Priorities
+from travelkaki.planner.types import Day, Dropped, Plan, PlanInput, PlanPlace, Priorities
 
 ROUNDS = 10  # k-means rounds
 SLACK = 15  # rough travel minutes per stop, for the "is this day full?" estimate
@@ -59,16 +62,11 @@ def _fits(group: list[PlanPlace], p: PlanPlace, budget: int) -> bool:
 
 
 def _assign(inp: PlanInput, pr: Priorities, budget: int) -> list[list[PlanPlace]]:
-    """Decide which day each candidate place goes to (steps 1-3)."""
+    """Pinned places and Must-gos (plus includes) per day. Maybes come later."""
     n = len(inp.dates)
     cands = [p for p in inp.places if p.id not in pr.exclude]
     pins = {pid: day for pid, day in pr.pins.items() if 1 <= day <= n}
     groups: list[list[PlanPlace]] = [[] for _ in range(n)]
-
-    def near(j: int, p: PlanPlace) -> float:
-        """How far `p` is from the middle of day j's places (the hotel if empty)."""
-        return distance_m(_centre(groups[j], inp.base), p.point)
-
     for p in cands:  # 1. pinned places first
         if p.id in pins:
             groups[pins[p.id] - 1].append(p)
@@ -77,20 +75,30 @@ def _assign(inp: PlanInput, pr: Priorities, budget: int) -> list[list[PlanPlace]
     for i, g in enumerate(_cluster(musts, min(n, len(musts)), inp.base)):  # 2. by area
         groups[i] += g
     for i, g in enumerate(groups):  # an over-full day gives away its farthest place
-        while _load(g) > budget and len(g) > 1:
+        while _load(g) > budget:
+            movable = [p for p in g if p.id not in pins]  # pins stay put (review #4)
+            if not movable:
+                break
             c = _centre(g, inp.base)
-            far = max(g, key=lambda p: (distance_m(c, p.point), p.id))
+            far = max(movable, key=lambda p: (distance_m(c, p.point), p.id))
             room = [j for j in range(n) if j != i and _fits(groups[j], far, budget)]
             if not room:
                 break
-            j = min(room, key=lambda j: (near(j, far), j))
+            j = min(room, key=lambda j: (_near(groups[j], far, inp.base), j))
             g.remove(far)
             groups[j].append(far)
-    maybes = sorted((p for p in free if p not in musts), key=lambda p: (-p.maybe, -p.must, p.id))
-    for p in maybes:  # 3. a day with room first, then the closest; fit_day drops it if no time
-        j = min(range(n), key=lambda j: (not _fits(groups[j], p, budget), near(j, p), j))
-        groups[j].append(p)
     return groups
+
+
+def _near(group: list[PlanPlace], p: PlanPlace, base) -> float:
+    """How far `p` is from the middle of a day's places (the hotel if empty)."""
+    return distance_m(_centre(group, base), p.point)
+
+
+def _try(inp: PlanInput, days: list[Day], i: int, p: PlanPlace) -> tuple[Day, list[Dropped]]:
+    """Refit day i with `p` added."""
+    kept = [inp.place(s.place_id) for s in days[i].stops]
+    return fit_day(days[i].date, i + 1, order(kept + [p], inp.base), inp.base, inp.window)
 
 
 def build_days(inp: PlanInput, pr: Priorities | None = None) -> Plan:
@@ -105,15 +113,32 @@ def build_days(inp: PlanInput, pr: Priorities | None = None) -> Plan:
     days = [day for day, _ in fitted]
     dropped: list[Dropped] = [x for _, lost in fitted for x in lost]
     for lost in list(dropped):  # repair: try a dropped must-go on another day
+        if lost.place_id in pr.pins:
+            continue  # the agent pinned it to that day: don't move it (review #4)
         p = inp.place(lost.place_id)
-        if p.tier != "must" and p.id not in pr.include:
-            continue
-        for i, day in enumerate(days):
-            kept = [inp.place(s.place_id) for s in day.stops]
-            trial = order(kept + [p], inp.base)
-            new_day, new_lost = fit_day(day.date, i + 1, trial, inp.base, inp.window)
+        for i in range(len(days)):
+            new_day, new_lost = _try(inp, days, i, p)
             if not new_lost:  # everything on that day still fits, plus this one
                 days[i] = new_day
                 dropped.remove(lost)
                 break
+    placed = {pid for g in groups for pid in (p.id for p in g)}
+    maybes = [p for p in inp.places if p.id not in placed and p.id not in pr.exclude]
+    for p in sorted(maybes, key=lambda p: (-p.maybe, -p.must, p.id)):  # 3. Maybes last
+        tries = sorted(range(len(days)), key=lambda i: (_near(_on(inp, days[i]), p, inp.base), i))
+        reason = f"no time left on Day {tries[0] + 1}" if tries else "no days to plan"
+        for i in tries:
+            new_day, new_lost = _try(inp, days, i, p)
+            if not new_lost:
+                days[i] = new_day
+                break
+        else:
+            dropped.append(Dropped(p.id, p.name, reason))
+    for p in inp.places:  # the agent's exclusions are listed, so the plan stays honest
+        if p.id in pr.exclude:
+            dropped.append(Dropped(p.id, p.name, "left out by the planner"))
     return Plan(days, dropped)
+
+
+def _on(inp: PlanInput, day: Day) -> list[PlanPlace]:
+    return [inp.place(s.place_id) for s in day.stops]

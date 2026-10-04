@@ -83,7 +83,7 @@ def test_exclude_pins_include():
     ids = planned_ids(plan)
     assert 2 in ids[2]  # pinned to day 2
     assert 3 in ids[1] + ids[2]  # included maybe is planned
-    assert 1 not in ids[1] + ids[2] and not plan.dropped  # excluded: the agent's choice
+    assert 1 not in ids[1] + ids[2]  # excluded: the agent's choice (listed in dropped)
 
 
 def test_more_days_than_places():
@@ -97,3 +97,49 @@ def test_far_place_is_not_planned_with_long_transfer():
     plan = build_days(make_input([place(1), far], days=1))
     assert all(s.travel <= 60 for d in plan.days for s in d.stops)
     assert [d.place_id for d in plan.dropped] == [2]
+
+
+def test_dropped_bar_does_not_stretch_the_day():
+    """Review #1: a bar closed today must not give other stops a 01:00 limit."""
+    from travelkaki.planner.validate import savable, validate
+
+    museums = [place(i, 35.69 + i * 0.003, 139.70, hours="Mo-Su 12:00-24:00") for i in range(1, 6)]
+    bar = place(9, 35.70, 139.70, category="bar", hours="Mo-Su 19:00-02:00; Tu off")
+    inp = make_input(museums + [bar], days=1)
+    plan = build_days(inp)
+    assert savable(plan, validate(plan, inp))
+
+
+def test_must_gos_beat_maybes():
+    """Review #2: Must-gos are planned before Maybes take the time."""
+    maybes = [place(10 + i, 35.6900 + i * 0.0005, 139.70, tier="maybe") for i in range(6)]
+    musts = [place(1, 35.701, 139.70), place(2, 35.702, 139.70)]
+    plan = build_days(make_input(maybes + musts, days=1))
+    planned = planned_ids(plan)[1]
+    assert 1 in planned and 2 in planned
+    assert all("no time left" in d.reason for d in plan.dropped)
+
+
+def test_excluded_must_is_dropped_with_reason():
+    """Review #3: the agent may leave a Must-go out; it's listed, so the plan can be saved."""
+    from travelkaki.planner.validate import savable, validate
+
+    inp = make_input([place(1), place(2, 35.692, 139.70)], days=1)
+    plan = build_days(inp, Priorities(exclude=[2]))
+    assert [(d.place_id, d.reason) for d in plan.dropped] == [(2, "left out by the planner")]
+    assert savable(plan, validate(plan, inp))
+
+
+def test_pinned_places_stay_on_their_day():
+    """Review #4: an over-full pinned day doesn't move pins elsewhere."""
+    places = [place(i, 35.69 + i * 0.001, 139.70) for i in range(1, 8)]
+    plan = build_days(make_input(places, days=2), Priorities(pins={i: 1 for i in range(1, 8)}))
+    assert planned_ids(plan)[2] == []
+
+
+def test_24_7_place_after_midnight_is_planned():
+    """Review #5: a late 24/7 karaoke after a bar is not 'closed'."""
+    bar = place(1, category="bar", hours="Mo-Su 22:00-23:30", visit=90)  # 22:00-23:30
+    karaoke = place(2, 35.6905, 139.70, category="karaoke club", hours="24/7", visit=60)
+    plan = build_days(make_input([bar, karaoke], days=1))
+    assert planned_ids(plan)[1] == [1, 2]

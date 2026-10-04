@@ -15,7 +15,7 @@ Pure code. Returns a list of Issues. A plan is **valid** when it has no
 """
 
 from travelkaki.planner.fit import MAX_TRANSFER, hhmm, limits
-from travelkaki.planner.hours import is_open, parse
+from travelkaki.planner.hours import open_through, parse
 from travelkaki.planner.rules import is_food
 from travelkaki.planner.travel import estimate
 from travelkaki.planner.types import Issue, Plan, PlanInput
@@ -45,7 +45,7 @@ def _check_day(n: int, day, inp: PlanInput) -> list[Issue]:
             out.append(
                 Issue("warning", "hours_unknown", f"Opening hours unknown for {p.name}", p.id)
             )
-        elif not (is_open(p.hours, wd, stop.start) and is_open(p.hours, wd, stop.end - 1)):
+        elif not open_through(p.hours, wd, stop.start, stop.end):
             text = f"{p.name} is closed at {hhmm(stop.start)} on Day {n}"
             out.append(Issue("error", "closed", text, p.id, n))
     planned = [p for p in places if p is not None]
