@@ -68,6 +68,7 @@ async def _post(bot, chat_id, reply_to, result: PipelineResult, poster, platform
         return
     with deps.sessions() as s:
         city = queries.get_trip(s, chat_id).city
+    poster = poster or result.author  # after a Retry we don't know who posted: credit the creator
     for place in result.places:
         text = card_text(place, city, poster, platform)
         await send(bot, chat_id, text, reply_to, card_keyboard(place, VoteCounts()))
@@ -75,6 +76,14 @@ async def _post(bot, chat_id, reply_to, result: PipelineResult, poster, platform
         await send(bot, chat_id, f"{escape(name)} already saved (+1 link)", reply_to)
     if result.extra:
         await send(bot, chat_id, f"+{result.extra} more, see /places", reply_to)
+
+
+async def announce_interrupted(bot, deps: Deps) -> None:
+    """At startup: links cut off by the last restart get a message with a Retry button."""
+    for source_id, chat_id in deps.interrupted:
+        await send(
+            bot, chat_id, error_text("interrupted", bot.username), markup=retry_keyboard(source_id)
+        )
 
 
 async def _never_silent(bot, chat_id, reply_to) -> None:

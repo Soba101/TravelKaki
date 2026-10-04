@@ -13,6 +13,7 @@ from fastapi import FastAPI
 from telegram.error import TelegramError
 
 from travelkaki.bot.app import build_application, register_commands
+from travelkaki.bot.results import announce_interrupted
 from travelkaki.config import get_settings
 from travelkaki.deps import build_deps, close_deps
 
@@ -46,6 +47,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             # The menu is nice to have. A Telegram hiccup here must not stop the bot
             # from booting (PR1 review). It is set again on the next restart.
             log.warning("Could not set the command menu: %s", e)
+        # Links cut off by the last restart: tell those chats and offer Retry (#15).
+        await announce_interrupted(bot.bot, deps)
         try:
             yield  # the app serves requests while we're paused here
         finally:

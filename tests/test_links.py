@@ -275,3 +275,26 @@ async def test_unreadable_tiktok_link_is_never_silent(sessions):
     ctx, tasks = _ctx(sessions)
     await links.on_message(_update(_url_message("https://www.tiktok.com/@a.b")), ctx)
     assert "one line" in _sent(ctx)[0] and tasks == []
+
+
+async def test_announce_interrupted_offers_retry(sessions):
+    deps = make_deps(sessions)
+    deps.interrupted = [(11, 1), (12, 2)]
+    ctx, _ = _ctx(sessions)
+    await results.announce_interrupted(ctx.bot, deps)
+    calls = ctx.bot.send_message.await_args_list
+    assert [c.args[0] for c in calls] == [1, 2]
+    assert calls[0].kwargs["reply_markup"].inline_keyboard[0][0].callback_data == "r:11"
+    assert "restarted" in _sent(ctx)[0]
+
+
+async def test_cards_fall_back_to_post_author(sessions, monkeypatch):
+    # PR3 review: after Retry we don't know who posted, so credit the post's creator.
+    trip, source = make_source(sessions)
+    with sessions() as s:
+        place = pq.add_place(s, trip.id, name="A", category="food", video_note="")
+    result = PipelineResult(places=[place], author="foodie")
+    monkeypatch.setattr(results.pipeline, "run", AsyncMock(return_value=result))
+    ctx, _ = _ctx(sessions)
+    await results.post_pipeline(ctx.bot, 1, None, source.id, None, "tiktok", make_deps(sessions))
+    assert "from foodie's TikTok" in _sent(ctx)[0]

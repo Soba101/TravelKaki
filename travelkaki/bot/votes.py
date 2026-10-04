@@ -11,10 +11,10 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from travelkaki.bot.cards import NO_TRIP, card_keyboard, parse_callback, places_text
-from travelkaki.bot.results import send
+from travelkaki.bot.results import post_pipeline, send
 from travelkaki.db import place_queries as pq
 from travelkaki.db import queries
-from travelkaki.db.models import Vote
+from travelkaki.db.models import SourceStatus, Vote
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +66,25 @@ async def _wrong_place(query, chat_id: int, place_id: int, deps) -> None:
         log.debug("wrong-place edit skipped: %s", e)
 
 
+async def _retry(query, chat_id: int, source_id: int, context, deps) -> None:
+    """'🔁 Retry' on a failure message: run the link through the pipeline again (#15)."""
+    with deps.sessions() as s:
+        source, trip = queries.get_source(s, source_id), queries.get_trip(s, chat_id)
+        mine = source is not None and trip is not None and source.trip_id == trip.id
+        if not mine or source.status != SourceStatus.failed:
+            await query.answer("Nothing to retry.")
+            return
+        queries.reset_source(s, source_id)
+    await query.answer("Retrying…")
+    try:
+        await query.edit_message_reply_markup(None)  # one tap is enough
+    except TelegramError as e:
+        log.debug("retry edit skipped: %s", e)
+    context.application.create_task(
+        post_pipeline(context.bot, chat_id, None, source_id, None, source.platform, deps)
+    )
+
+
 async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Any inline button tap."""
     query, deps = update.callback_query, context.bot_data["deps"]
@@ -80,7 +99,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     elif kind == "w":
         await _wrong_place(query, chat_id, item_id, deps)
     else:
-        await query.answer()  # 'r' (retry) arrives in Task 15
+        await _retry(query, chat_id, item_id, context, deps)
 
 
 async def places_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

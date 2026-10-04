@@ -123,3 +123,40 @@ async def test_wrong_place_clears_the_pin(sessions):
     assert text.endswith("❌ Pin removed")
     markup = q.edit_message_text.await_args.kwargs["reply_markup"]
     assert len(markup.inline_keyboard) == 1  # only the vote row is left
+
+
+def _failed_source(sessions, status="failed"):
+    from travelkaki.db import queries as q
+
+    _, source = make_source(sessions)
+    with sessions() as s:
+        q.set_source(s, source.id, status=status, error="llm_unavailable")
+    return source
+
+
+async def test_retry_restarts_a_failed_link(sessions):
+    from travelkaki.db import queries as q
+
+    source = _failed_source(sessions)
+    ctx, tasks = _ctx(sessions)
+    query = _query(f"r:{source.id}")
+    await votes.on_callback(
+        SimpleNamespace(callback_query=query, effective_chat=query.message.chat), ctx
+    )
+    query.answer.assert_awaited_once_with("Retrying…")
+    query.edit_message_reply_markup.assert_awaited_once_with(None)  # Retry button removed
+    assert len(tasks) == 1
+    with sessions() as s:
+        assert q.get_source(s, source.id).status == "pending"
+    tasks[0].close()
+
+
+async def test_retry_on_finished_link_does_nothing(sessions):
+    source = _failed_source(sessions, status="done")
+    ctx, tasks = _ctx(sessions)
+    query = _query(f"r:{source.id}")
+    await votes.on_callback(
+        SimpleNamespace(callback_query=query, effective_chat=query.message.chat), ctx
+    )
+    query.answer.assert_awaited_once_with("Nothing to retry.")
+    assert tasks == []

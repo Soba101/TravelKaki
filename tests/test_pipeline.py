@@ -136,3 +136,25 @@ async def test_retry_after_partial_save_makes_no_duplicates(sessions):
     await pipeline.run(source.id, deps)
     await pipeline.run(source.id, deps)
     assert _count(sessions, Place) == 2
+
+
+async def test_fail_then_retry_succeeds(sessions):
+    _, source = make_source(sessions)
+    deps = make_deps(sessions, FakeLlm(error=LlmUnavailable()))
+    assert (await pipeline.run(source.id, deps)).error == "llm_unavailable"
+    with sessions() as s:
+        queries.reset_source(s, source.id)  # what the Retry button does
+    deps.llm = FakeLlm(places_answer("Ichiran"))
+    result = await pipeline.run(source.id, deps)
+    assert result.error is None and [p.name for p in result.places] == ["Ichiran"]
+
+
+async def test_retry_reuses_the_saved_caption(sessions):
+    # PR3 review: don't fetch again (Instagram may block a second fetch).
+    _, source = make_source(sessions)
+    with sessions() as s:
+        queries.set_source(
+            s, source.id, status="failed", error="llm_unavailable", caption="Ichiran!"
+        )
+    deps = make_deps(sessions, FakeLlm(places_answer("Ichiran")), fetch=caption_fetcher(text=None))
+    assert (await pipeline.run(source.id, deps)).error is None

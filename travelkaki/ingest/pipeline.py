@@ -18,6 +18,7 @@ from travelkaki.db import place_queries as pq
 from travelkaki.db import queries
 from travelkaki.db.models import Confidence, Place, SourceStatus, Trip
 from travelkaki.deps import Deps
+from travelkaki.ingest.captions import Caption
 from travelkaki.ingest.dedupe import find_duplicate
 from travelkaki.ingest.extract import ExtractedPlace, extract_places
 from travelkaki.llm.cap import CapReached, make_counter
@@ -99,7 +100,10 @@ async def _run(source_id: int, deps: Deps) -> PipelineResult:
         trip = s.get(Trip, source.trip_id)
         queries.set_source(s, source_id, status=SourceStatus.caption)
 
-    caption = await deps.fetch_caption(source.url, source.platform, deps.http)
+    if source.caption:  # a Retry: reuse the saved caption (Instagram may block a 2nd fetch)
+        caption = Caption(source.caption, None)
+    else:
+        caption = await deps.fetch_caption(source.url, source.platform, deps.http)
     if caption is None:
         return _fail(deps, source_id, NO_CAPTION)
     with deps.sessions() as s:  # keep the caption (for Retry and the M5 evals)
