@@ -92,10 +92,12 @@ def test_more_days_than_places():
     assert sum(1 for d in plan.days if not d.stops) == 2
 
 
-def test_far_place_is_not_planned_with_long_transfer():
-    far = place(2, 36.30, 139.70)  # ~70 km away
+def test_too_far_from_other_stops_is_dropped():
+    """Between stops the 60-min rule still holds: a far place can't follow a city stop
+    on a 1-day trip, so one of them is dropped with a reason."""
+    far = place(2, 36.30, 139.70, tier="maybe")  # ~68 km away
     plan = build_days(make_input([place(1), far], days=1))
-    assert all(s.travel <= 60 for d in plan.days for s in d.stops)
+    assert all(s.travel <= 60 for s in plan.days[0].stops[1:])
     assert [d.place_id for d in plan.dropped] == [2]
 
 
@@ -143,3 +145,59 @@ def test_24_7_place_after_midnight_is_planned():
     karaoke = place(2, 35.6905, 139.70, category="karaoke club", hours="24/7", visit=60)
     plan = build_days(make_input([bar, karaoke], days=1))
     assert planned_ids(plan)[1] == [1, 2]
+
+
+def test_day_trip_gets_its_own_day():
+    """Donovan: a far Must-go (e.g. ~70 km away) is a day trip, not dropped.
+    The first stop of a day may be up to 3 h from the hotel."""
+    from travelkaki.planner.validate import savable, validate
+
+    far = place(9, 36.30, 139.70)  # ~68 km north
+    city = [place(1), place(2, 35.692, 139.70)]
+    inp = make_input(city + [far], days=2)
+    plan = build_days(inp)
+    ids = planned_ids(plan)
+    assert [9] in ids.values()  # alone on its own day
+    assert savable(plan, validate(plan, inp))
+
+
+def test_far_place_goes_first_on_its_day():
+    far = place(9, 36.30, 139.70)
+    near_far = place(8, 36.302, 139.70)
+    plan = build_days(make_input([far, near_far], days=1))
+    assert planned_ids(plan)[1][0] in (8, 9) and len(planned_ids(plan)[1]) == 2
+
+
+def test_pin_to_a_closed_day_is_moved():
+    """Live run: the model pinned a Must-go to the day it's closed. A pin is a wish,
+    not a reason to lose a Must-go: if it's closed that day, the repair pass moves it."""
+    p = place(1, hours="Mo,We-Su 09:00-22:00")  # closed Tuesday
+    plan = build_days(make_input([p], days=2), Priorities(pins={1: 1}))
+    assert planned_ids(plan) == {1: [], 2: [1]}
+
+
+def test_restaurants_are_not_planned_for_breakfast():
+    """Live run: a tonkatsu restaurant was planned at 09:37. Meal places start at 11:00
+    or later (cafes, bakeries and markets may be earlier)."""
+    plan = build_days(make_input([place(1, category="restaurant")], days=1))
+    assert plan.days[0].stops[0].start >= 660
+    cafe = build_days(make_input([place(2, category="cafe")], days=1))
+    assert cafe.days[0].stops[0].start < 660
+
+
+def test_restaurant_near_hotel_does_not_delay_the_day():
+    """PR2 review #1: a ramen shop next to the hotel must not make the day start at 11:00."""
+    ramen = place(1, 35.6902, 139.7000, category="ramen", hours="24/7")
+    museum = place(2, 35.6960, 139.7000, hours="Mo-Su 09:30-17:00")
+    plan = build_days(make_input([ramen, museum], days=1))
+    starts = {s.place_id: s.start for s in plan.days[0].stops}
+    assert starts[2] < 660 and starts[1] >= 660
+
+
+def test_far_evening_place_does_not_take_over_the_day():
+    """PR2 review #8: a far bar must not push out Must-gos near the hotel."""
+    bar = place(9, 35.99, 139.70, category="bar", hours="Mo-Su 18:00-02:00")  # ~33 km
+    near = [place(1, 35.692, 139.70), place(2, 35.694, 139.70, category="park")]
+    plan = build_days(make_input(near + [bar], days=1))
+    planned = [s.place_id for s in plan.days[0].stops]
+    assert 1 in planned and 2 in planned

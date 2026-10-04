@@ -59,8 +59,10 @@ def test_day_too_long():
 
 
 def test_long_transfer():
-    p = place(1)
-    assert "long_transfer" in _codes(validate(_one_stop(p, travel=75), make_input([p], days=1)))
+    """A 75-min hop between two stops breaks the rule (the first trip may be longer)."""
+    p, q = place(1), place(2)
+    plan = Plan([Day(TUE, [Stop(1, 600, 720, 5, "walk"), Stop(2, 795, 915, 75, "transit")])])
+    assert "long_transfer" in _codes(validate(plan, make_input([p, q], days=1)))
 
 
 def test_hours_unknown_is_a_warning():
@@ -112,3 +114,17 @@ def test_visit_across_a_break_is_closed():
     """Review #12: open at the start and end isn't enough if it closes in between."""
     p = place(1, hours="Mo-Su 10:00-14:00,14:30-20:00")  # 2 h museum from 13:00
     assert "closed" in _codes(validate(_one_stop(p, start=780), make_input([p], days=1)))
+
+
+def test_first_stop_may_be_a_long_day_trip():
+    """A day may start with a trip of up to 3 h; later hops are capped at 60 min."""
+    p = place(1, hours="24/7")
+    inp = make_input([p], days=1)
+    assert "long_transfer" not in _codes(validate(_one_stop(p, travel=150), inp))
+    assert "long_transfer" in _codes(validate(_one_stop(p, travel=200), inp))
+
+
+def test_morning_cafe_is_not_a_missed_meal():
+    """Live demo: a cafe at 10:00 gave 'No meal stop at lunch'. Only meal places count."""
+    p = place(1, category="cafe", hours="24/7")
+    assert _codes(validate(_one_stop(p, start=600), make_input([p], days=1))) == []

@@ -113,8 +113,10 @@ def build_days(inp: PlanInput, pr: Priorities | None = None) -> Plan:
     days = [day for day, _ in fitted]
     dropped: list[Dropped] = [x for _, lost in fitted for x in lost]
     for lost in list(dropped):  # repair: try a dropped must-go on another day
-        if lost.place_id in pr.pins:
-            continue  # the agent pinned it to that day: don't move it (review #4)
+        if lost.place_id in pr.pins and "closed" not in lost.reason:
+            # The agent pinned it to that day: don't move it (review #4).
+            # But a pin to a day it's closed is a mistake: then we may move it (live run).
+            continue
         p = inp.place(lost.place_id)
         for i in range(len(days)):
             new_day, new_lost = _try(inp, days, i, p)

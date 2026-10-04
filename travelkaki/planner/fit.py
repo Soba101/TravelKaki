@@ -6,18 +6,22 @@ Rules (M2 spec, "build_days" steps 4-5):
   60 min (the first stop may wait longer: the day just starts later).
   Otherwise try it later in the day. Still impossible -> dropped, with a reason.
 - A transfer over 60 min, or a day running past its end, also drops the place.
+- Day trips: the FIRST stop may be up to 3 h from the hotel (express train,
+  bus or taxi), so far places come first on their day. Hops between stops
+  stay under 60 min. (Donovan's call, after PR1.)
 """
 
 from datetime import date
 
 from travelkaki.geo.distance import distance_m
 from travelkaki.planner.hours import next_open, open_through, parse
-from travelkaki.planner.rules import is_evening
+from travelkaki.planner.rules import MEAL_FROM, is_evening, is_meal
 from travelkaki.planner.travel import estimate
 from travelkaki.planner.types import EVENING_END, MAX_SPAN, Day, Dropped, PlanPlace, Stop, Window
 
 MAX_WAIT = 60  # minutes we'll wait for a place to open
-MAX_TRANSFER = 60  # minutes; longer trips break the validator's rule
+MAX_TRANSFER = 60  # minutes between stops; longer trips break the validator's rule
+MAX_DAY_TRIP = 180  # minutes from the hotel to a day's first stop (a day trip)
 
 
 def day_label(d: date) -> str:
@@ -26,15 +30,28 @@ def day_label(d: date) -> str:
 
 
 def order(places: list[PlanPlace], base: tuple[float, float]) -> list[PlanPlace]:
-    """Nearest neighbour from the base. Evening places are visited last."""
+    """Nearest neighbour from the base. Far (day-trip) places first, evening places last.
+
+    A far EVENING place is not a day trip start: it stays last (PR2 review #8).
+    A meal place doesn't open the day if something else can (PR2 review #1),
+    or the whole morning waits for 11:00.
+    """
+    late = [p for p in places if is_evening(p)]
+    far = [p for p in places if p not in late and estimate(base, p.point)[0] > MAX_TRANSFER]
+    rest = [p for p in places if p not in far and p not in late]
     out, cur = [], base
-    for group in ([p for p in places if not is_evening(p)], [p for p in places if is_evening(p)]):
+    for group in (far, rest, late):
         left = list(group)
         while left:
             nxt = min(left, key=lambda p: (distance_m(cur, p.point), p.id))
             left.remove(nxt)
             out.append(nxt)
             cur = nxt.point
+    if out and is_meal(out[0].category):
+        first_other = next((p for p in out if not is_meal(p.category) and p not in late), None)
+        if first_other is not None:
+            out.remove(first_other)
+            out.insert(0, first_other)
     return out
 
 
@@ -48,9 +65,12 @@ def limits(window: Window, places: list[PlanPlace]) -> tuple[int, int, int]:
 
 def _open_at(p: PlanPlace, weekday: int, arrive: int, first: bool) -> int | None:
     """When we can start the visit (maybe after waiting), or None if we can't."""
+    earliest = max(arrive, MEAL_FROM) if is_meal(p.category) else arrive  # no breakfast ramen
+    if not first and earliest - arrive > MAX_WAIT:
+        return None  # too early for a meal: try it later in the day
     if parse(p.hours) is None:
-        return arrive  # unknown hours: assume open (the validator warns)
-    start = next_open(p.hours, weekday, arrive)
+        return earliest  # unknown hours: assume open (the validator warns)
+    start = next_open(p.hours, weekday, earliest)
     if start is None or (not first and start - arrive > MAX_WAIT):
         return None
     if not open_through(p.hours, weekday, start, start + p.visit):
@@ -76,8 +96,13 @@ def fit_day(
     while queue:
         p = queue.pop(0)
         travel, mode = estimate(cur, p.point)
-        if travel > MAX_TRANSFER:
-            dropped.append(Dropped(p.id, p.name, f"over {MAX_TRANSFER} min from the other stops"))
+        if travel > (MAX_TRANSFER if stops else MAX_DAY_TRIP):
+            where = (
+                f"over {MAX_TRANSFER} min from the other stops"
+                if stops
+                else "too far for a day trip"
+            )
+            dropped.append(Dropped(p.id, p.name, where))
             continue
         arrive = _open_at(p, d.weekday(), t + travel, first=not stops)
         if arrive is None:

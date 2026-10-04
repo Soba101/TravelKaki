@@ -1,4 +1,4 @@
-"""Small planner rules: vote tiers, visit length, food and evening places (M2 spec).
+"""Small planner rules: vote tiers, visit length, meal and evening places (M2 spec).
 
 Categories come from the LLM as free text ("ramen shop", "Museum"), so we
 match lower-case keywords. The first matching group wins.
@@ -18,11 +18,11 @@ VISIT_RULES = [
 ]
 DEFAULT_VISIT = 60
 
-FOOD_WORDS = (
-    "cafe", "coffee", "bakery", "dessert", "restaurant", "ramen", "sushi",
-    "food", "market", "stall", "izakaya",
-)  # fmt: skip
 EVENING_WORDS = ("bar", "nightlife", "club", "izakaya")
+# Sit-down meal places: not planned before 11:00 (a live run put tonkatsu at 09:37).
+# Cafes, bakeries and markets are fine in the morning.
+MEAL_WORDS = ("restaurant", "ramen", "sushi", "izakaya", "tonkatsu", "yakitori")
+MEAL_FROM = 11 * 60
 EVENING_OPENS = 17 * 60  # opens at 17:00 or later = an evening place
 
 
@@ -50,8 +50,8 @@ def visit_minutes(category: str) -> int:
     return DEFAULT_VISIT
 
 
-def is_food(category: str) -> bool:
-    return _has(category, FOOD_WORDS)
+def is_meal(category: str) -> bool:
+    return _has(category, MEAL_WORDS)
 
 
 def is_evening(place: PlanPlace) -> bool:

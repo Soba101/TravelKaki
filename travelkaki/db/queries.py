@@ -32,6 +32,8 @@ def upsert_trip(
 ) -> Trip:
     """Create the chat's trip, or update it (places are kept)."""
     trip = get_trip(s, chat_id) or Trip(chat_id=chat_id)
+    if trip.hotel != hotel:  # new hotel: forget the old hotel's pin (M2 planner)
+        trip.hotel_lat = trip.hotel_lng = None
     trip.city, trip.start_date, trip.end_date, trip.hotel = city, start, end, hotel
     trip.city_lat, trip.city_lng = city_lat, city_lng
     s.add(trip)

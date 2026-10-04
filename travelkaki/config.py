@@ -53,6 +53,15 @@ class Settings(BaseSettings):
     # Optional contact email for OpenStreetMap Nominatim (their usage policy asks for one).
     nominatim_email: str | None = None
 
+    # --- M2 settings (spec: docs/superpowers/specs/2026-10-05-m2-planner-agent-design.md) ---
+
+    # LLM that runs the planner agent (picks tools, explains trade-offs). Must support
+    # tool calling. Local Ollama by default: a spike ran the full loop 3/3 times.
+    plan_model: str = "ollama_chat/qwen3:4b-instruct"
+
+    # Optional cloud model, tried once per round if the local one fails. Empty = none.
+    plan_fallback_model: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -29,8 +29,10 @@ RETRYABLE = {
 }
 
 
-async def send(bot, chat_id: int, text: str, reply_to: int | None = None, markup=None) -> None:
+async def send(bot, chat_id: int, text: str, reply_to: int | None = None, markup=None) -> bool:
     """Send one HTML message. A Telegram error is logged, never crashes the task.
+
+    Returns True if it was sent (M2: /plan tells the group when posting failed).
 
     Telegram allows ~20 messages a minute per group. If we hit that (RetryAfter),
     wait as long as Telegram asks and try once more, so no card is lost. (PR3 review)
@@ -48,7 +50,7 @@ async def send(bot, chat_id: int, text: str, reply_to: int | None = None, markup
                 else None,
                 link_preview_options=LinkPreviewOptions(is_disabled=True),  # no big previews
             )
-            return
+            return True
         except RetryAfter as e:
             wait = e.retry_after
             wait = wait.total_seconds() if hasattr(wait, "total_seconds") else wait
@@ -57,7 +59,8 @@ async def send(bot, chat_id: int, text: str, reply_to: int | None = None, markup
                 await asyncio.sleep(wait)
         except TelegramError as e:
             log.warning("send failed chat=%s: %s", chat_id, e)
-            return
+            return False
+    return False  # flood limit twice in a row
 
 
 async def _post(bot, chat_id, reply_to, result: PipelineResult, poster, platform, deps, source_id):
