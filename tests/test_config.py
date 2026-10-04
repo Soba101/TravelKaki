@@ -44,3 +44,11 @@ def test_empty_env_values_mean_unset(monkeypatch):
     assert s.llm_api_key is None
     assert s.nominatim_email is None
     assert s.llm_daily_cap == 100
+
+
+def test_plan_defaults(monkeypatch):
+    """M2: the planner model is local by default, with no fallback."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "x:y")
+    s = Settings(_env_file=None)
+    assert s.plan_model == "ollama_chat/qwen3:4b-instruct"
+    assert s.plan_fallback_model is None

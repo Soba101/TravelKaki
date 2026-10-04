@@ -123,3 +123,54 @@ def test_litellm_uses_local_cost_map(monkeypatch):
 
     LlmClient(_settings())  # real import path (completion=None)
     assert os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] == "True"
+
+
+# ---- M2: tool calling for the planner ----
+
+TOOLS = [{"type": "function", "function": {"name": "list_places", "parameters": {}}}]
+
+
+def _tool_reply(name="list_places", args="{}", tokens=42):
+    """Shape of a LiteLLM tool-call response."""
+    call = SimpleNamespace(id="c1", function=SimpleNamespace(name=name, arguments=args))
+    msg = SimpleNamespace(content=None, tool_calls=[call])
+    msg.model_dump = lambda exclude_none=True: {"role": "assistant", "tool_calls": ["c1"]}
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=msg)], usage=SimpleNamespace(total_tokens=tokens)
+    )
+
+
+async def test_chat_tools_parses_tool_calls():
+    completion = AsyncMock(return_value=_tool_reply())
+    client, _ = _client(completion)
+    reply = await client.chat_tools(MESSAGES, TOOLS, Mock())
+    assert [(c.id, c.name, c.arguments) for c in reply.tool_calls] == [("c1", "list_places", "{}")]
+    assert reply.tokens == 42 and reply.content is None
+    assert reply.message == {"role": "assistant", "tool_calls": ["c1"]}
+    kwargs = completion.await_args.kwargs
+    assert kwargs["tools"] == TOOLS and kwargs["max_tokens"] == 1500
+    assert kwargs["timeout"] == 120 and kwargs["temperature"] == 0
+
+
+async def test_chat_tools_uses_plan_model():
+    completion = AsyncMock(return_value=_tool_reply())
+    client, _ = _client(completion, plan_model="ollama_chat/qwen3:8b")
+    await client.chat_tools(MESSAGES, TOOLS, Mock())
+    assert completion.await_args.kwargs["model"] == "ollama_chat/qwen3:8b"
+
+
+async def test_chat_tools_falls_back_then_raises():
+    completion = AsyncMock(side_effect=ConnectionError("down"))
+    client, _ = _client(completion, plan_fallback_model="anthropic/claude-haiku-4-5")
+    with pytest.raises(LlmUnavailable):
+        await client.chat_tools(MESSAGES, TOOLS, Mock())
+    models = [c.kwargs["model"] for c in completion.await_args_list]
+    assert models == ["ollama_chat/qwen3:4b-instruct"] * 2 + ["anthropic/claude-haiku-4-5"]
+
+
+async def test_chat_tools_cap_stops_at_once():
+    completion = AsyncMock(return_value=_tool_reply())
+    client, _ = _client(completion)
+    with pytest.raises(CapReached):
+        await client.chat_tools(MESSAGES, TOOLS, Mock(side_effect=CapReached()))
+    completion.assert_not_awaited()
