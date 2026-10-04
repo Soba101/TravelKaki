@@ -174,3 +174,12 @@ def test_pin_to_a_closed_day_is_moved():
     p = place(1, hours="Mo,We-Su 09:00-22:00")  # closed Tuesday
     plan = build_days(make_input([p], days=2), Priorities(pins={1: 1}))
     assert planned_ids(plan) == {1: [], 2: [1]}
+
+
+def test_restaurants_are_not_planned_for_breakfast():
+    """Live run: a tonkatsu restaurant was planned at 09:37. Meal places start at 11:00
+    or later (cafes, bakeries and markets may be earlier)."""
+    plan = build_days(make_input([place(1, category="restaurant")], days=1))
+    assert plan.days[0].stops[0].start >= 660
+    cafe = build_days(make_input([place(2, category="cafe")], days=1))
+    assert cafe.days[0].stops[0].start < 660

@@ -23,6 +23,10 @@ FOOD_WORDS = (
     "food", "market", "stall", "izakaya",
 )  # fmt: skip
 EVENING_WORDS = ("bar", "nightlife", "club", "izakaya")
+# Sit-down meal places: not planned before 11:00 (a live run put tonkatsu at 09:37).
+# Cafes, bakeries and markets are fine in the morning.
+MEAL_WORDS = ("restaurant", "ramen", "sushi", "izakaya", "tonkatsu", "yakitori")
+MEAL_FROM = 11 * 60
 EVENING_OPENS = 17 * 60  # opens at 17:00 or later = an evening place
 
 
@@ -52,6 +56,10 @@ def visit_minutes(category: str) -> int:
 
 def is_food(category: str) -> bool:
     return _has(category, FOOD_WORDS)
+
+
+def is_meal(category: str) -> bool:
+    return _has(category, MEAL_WORDS)
 
 
 def is_evening(place: PlanPlace) -> bool:

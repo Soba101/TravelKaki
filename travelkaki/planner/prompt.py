@@ -11,7 +11,8 @@ Goal: a plan with every Must-go place in it, if that is possible.
 Code does the maths. You decide what to include and explain the trade-offs.
 
 Steps:
-1. Call list_places.
+1. Call list_places. (Don't call get_place_details for every place: only if you
+   really need one detail. Rounds are limited.)
 2. Call build_days (no arguments first). It returns a draft plan.
 3. Call validate. If it lists errors, try again with build_days, for example:
    pin a place to a day where it is open, or exclude a Maybe to make room.
@@ -23,7 +24,7 @@ Rules:
 - Must-go places matter most. Maybe places only if there is time.
 - If two Must-go places compete and no plan fits both, you may ask the group
   with ask_group (if you have it). Ask at most twice.
-- You have at most 8 rounds. Always finish with save_plan."""
+- You have at most 8 rounds. Always finish with save_plan, as a real tool call."""
 
 
 def _fn(name: str, description: str, properties: dict | None = None, required=()) -> dict:

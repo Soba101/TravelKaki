@@ -106,3 +106,13 @@ def test_versions_increase(sessions):
         items = s.scalar(select(func.count()).select_from(ItineraryItem))
     assert (first.version, second.version) == (1, 2)
     assert items == 2 * sum(len(d.stops) for d in plan.days)
+
+
+async def test_tool_call_written_as_text_is_used(sessions):
+    """Live run: qwen wrote save_plan as JSON text instead of a tool call on its last
+    round. We read it as a real call, so the agent's plan isn't thrown away."""
+    text_call = '{"name": "save_plan", "arguments": {"tradeoffs": "Fits well."}}'
+    llm = FakeToolLlm(GOOD_RUN[:3] + [tool_reply(text=text_call)])
+    deps, inp = _setup(sessions, llm)
+    result = await run_planner(deps, inp, "run-1")
+    assert result.used_ai and result.tradeoffs == "Fits well."

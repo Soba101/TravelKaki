@@ -15,7 +15,7 @@ from datetime import date
 
 from travelkaki.geo.distance import distance_m
 from travelkaki.planner.hours import next_open, open_through, parse
-from travelkaki.planner.rules import is_evening
+from travelkaki.planner.rules import MEAL_FROM, is_evening, is_meal
 from travelkaki.planner.travel import estimate
 from travelkaki.planner.types import EVENING_END, MAX_SPAN, Day, Dropped, PlanPlace, Stop, Window
 
@@ -55,9 +55,12 @@ def limits(window: Window, places: list[PlanPlace]) -> tuple[int, int, int]:
 
 def _open_at(p: PlanPlace, weekday: int, arrive: int, first: bool) -> int | None:
     """When we can start the visit (maybe after waiting), or None if we can't."""
+    earliest = max(arrive, MEAL_FROM) if is_meal(p.category) else arrive  # no breakfast ramen
+    if not first and earliest - arrive > MAX_WAIT:
+        return None  # too early for a meal: try it later in the day
     if parse(p.hours) is None:
-        return arrive  # unknown hours: assume open (the validator warns)
-    start = next_open(p.hours, weekday, arrive)
+        return earliest  # unknown hours: assume open (the validator warns)
+    start = next_open(p.hours, weekday, earliest)
     if start is None or (not first and start - arrive > MAX_WAIT):
         return None
     if not open_through(p.hours, weekday, start, start + p.visit):

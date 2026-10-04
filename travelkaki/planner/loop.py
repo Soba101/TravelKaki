@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from travelkaki.db import plan_queries as plq
 from travelkaki.llm.cap import CapReached, make_counter
-from travelkaki.llm.client import LlmUnavailable
+from travelkaki.llm.client import LlmUnavailable, ToolCall
 from travelkaki.planner.build import build_days
 from travelkaki.planner.fit import day_label
 from travelkaki.planner.prompt import ASK_TOOL, SYSTEM_PROMPT, TOOLS
@@ -36,6 +36,23 @@ class PlanResult:
     used_ai: bool  # False = the code-only fallback made this plan
     tradeoffs: str  # the agent's short summary ("" without AI)
     rounds: int  # LLM rounds used
+
+
+def _text_call(content: str | None) -> ToolCall | None:
+    """A tool call the model wrote as text: {"name": ..., "arguments": {...}}.
+
+    Qwen sometimes does this instead of a real tool call (seen in a live run on
+    its last round), so we read it rather than throw the plan away.
+    """
+    text = (content or "").strip().removeprefix("```json").removeprefix("```").removesuffix("```")
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("name"), str):
+        return None
+    args = data.get("arguments", {})
+    return ToolCall("text-call", data["name"], args if isinstance(args, str) else json.dumps(args))
 
 
 class _Tracer:
@@ -75,6 +92,12 @@ async def _agent(deps, inp: PlanInput, st: ToolState, trace: _Tracer, tools: lis
         calls = [f"{c.name}({c.arguments})" for c in reply.tool_calls]
         trace("llm", None, f"round {rounds}", reply.content or "; ".join(calls), reply.tokens)
         messages.append(reply.message)
+        text_call = None if reply.tool_calls else _text_call(reply.content)
+        if text_call is not None:  # answer it as a normal message (there's no call id)
+            out = await run_tool(text_call.name, text_call.arguments, st)
+            trace("tool", text_call.name, text_call.arguments, out)
+            messages.append({"role": "user", "content": f"Result of {text_call.name}: {out}"})
+            continue
         if not reply.tool_calls:
             messages.append({"role": "user", "content": NUDGE})
             continue
