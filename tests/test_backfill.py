@@ -63,3 +63,30 @@ async def test_backfill_counts_misses_and_skips_pinned_and_wrong_place(sessions)
         by_name = {p.name: p for p in pq.trip_places(s, trip_id)}
         assert by_name["Pinned"].lat == 1.0
         assert by_name["Wrong one"].lat is None  # the user rejected that pin; leave it
+
+
+async def test_clear_pin_then_backfill_does_not_repin(sessions):
+    # A pre-M2 place has opening_hours NULL; "Wrong place" must still mark it as handled.
+    _trip_with_unpinned(sessions, "Ichiran")
+    with sessions() as s:
+        pq.clear_pin(s, s.query(Place).one().id)
+
+    done, missed = await backfill(make_deps(sessions), FakeGeo())
+
+    assert (done, missed) == (0, 0)
+    with sessions() as s:
+        assert s.query(Place).one().lat is None
+
+
+async def test_backfill_survives_one_bad_place(sessions):
+    _trip_with_unpinned(sessions, "Boom", "Ichiran")
+
+    class BadGeo(FakeGeo):
+        async def locate(self, name, city, center):
+            if name == "Boom":
+                raise ValueError("odd response")
+            return await super().locate(name, city, center)
+
+    done, missed = await backfill(make_deps(sessions), BadGeo())
+
+    assert (done, missed) == (1, 1)

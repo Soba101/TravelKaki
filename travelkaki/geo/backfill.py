@@ -43,15 +43,21 @@ async def backfill(deps: Deps, geo) -> tuple[int, int]:
                 if city:
                     trip.city_lat, trip.city_lng = city.lat, city.lng
             centre = (trip.city_lat, trip.city_lng) if trip.city_lat is not None else None
+            s.commit()  # keep the city pin
             for place in todo:
-                hit, confidence = await geo.locate(place.name, trip.city, centre)
-                if hit is None:  # leave it unpinned; the next run tries again
+                try:
+                    hit, confidence = await geo.locate(place.name, trip.city, centre)
+                    if hit is None:  # leave it unpinned; the next run tries again
+                        missed += 1
+                        continue
+                    place.lat, place.lng, place.address = hit.lat, hit.lng, hit.address
+                    place.confidence, place.opening_hours = confidence, hit.opening_hours or ""
+                    s.commit()  # per place, so a crash keeps what was done
+                    done += 1
+                except Exception:  # one odd response must not lose the whole run
+                    s.rollback()
+                    log.exception("backfill failed for place %s", place.id)
                     missed += 1
-                    continue
-                place.lat, place.lng, place.address = hit.lat, hit.lng, hit.address
-                place.confidence, place.opening_hours = confidence, hit.opening_hours or ""
-                done += 1
-            s.commit()  # one trip at a time, so a crash keeps what was done
     return done, missed
 
 
