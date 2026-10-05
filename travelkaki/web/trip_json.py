@@ -37,4 +37,15 @@ def trip_json(s: Session, trip: Trip) -> dict:
             }
         )
     # days = the latest /plan, for the day tabs (M3, #25). [] before the first /plan.
-    return {"city": trip.city, "hotel": hotel, "places": places, "days": days_json(s, trip)}
+    # center = where to look when nothing has a pin yet (live check 2026-10-06 showed
+    # the whole world map). The city centre from /newtrip, or None.
+    center = None
+    if trip.city_lat is not None and trip.city_lng is not None:
+        center = [trip.city_lat, trip.city_lng]
+    return {
+        "city": trip.city,
+        "center": center,
+        "hotel": hotel,
+        "places": places,
+        "days": days_json(s, trip),
+    }

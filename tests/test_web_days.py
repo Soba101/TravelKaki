@@ -59,3 +59,12 @@ def test_no_hotel_pin_uses_city_centre(sessions):
         save(s, trip, [Day(D1, [Stop(a.id, 600, 660, 20, "transit")])])
         days = days_json(s, trip)
     assert "origin=35.0,139.0" in days[0]["links"][0]
+
+
+def test_trip_json_has_city_center(sessions):
+    # Live check fix: with no pins, the map zooms to the city, not the world.
+    from travelkaki.web.trip_json import trip_json
+
+    with sessions() as s:
+        trip, _, _ = make_trip(s)
+        assert trip_json(s, trip)["center"] == [35.0, 139.0]

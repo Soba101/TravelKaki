@@ -48,9 +48,10 @@ function wireLinks(el) {
   });
 }
 
-// Fit the map to these points. With none, show the world zoomed out.
-function fit(map, points) {
+// Fit the map to these points. With none, show the trip's city (or the world).
+function fit(map, points, center) {
   if (points.length) map.fitBounds(points, { padding: [30, 30], maxZoom: 15 });
+  else if (center) map.setView(center, 12);  // live check: no pins showed the whole world
   else map.setView([20, 0], 2);
 }
 
@@ -67,7 +68,7 @@ function drawAll(map, layer, trip) {
     pin(layer, p.lat, p.lng, COLOURS[p.tier] || COLOURS.maybe, popupHtml(p));
     points.push([p.lat, p.lng]);
   }
-  fit(map, points);
+  fit(map, points, trip.center);
 
   const legend = Object.entries({ must: "Must-go", maybe: "Maybe", skip: "Skip", hotel: "Hotel" })
     .map(([k, label]) => `<span><i class="dot" style="background:${COLOURS[k]}"></i>${label}</span>`)
@@ -99,7 +100,7 @@ function drawDay(map, layer, trip, day) {
     points.push([trip.hotel.lat, trip.hotel.lng]);  // back to the hotel at night
   }
   L.polyline(points, { color: COLOURS.hotel, weight: 3, opacity: 0.7 }).addTo(layer);
-  fit(map, points);
+  fit(map, points, trip.center);
   // Long days have more than one link (Google Maps allows 9 stops per link).
   const links = day.links.map((url, k) =>
     `<a href="#" data-url="${esc(url)}">Directions${day.links.length > 1 ? " " + (k + 1) : ""}</a>`);
