@@ -48,3 +48,12 @@ async def test_answer_is_cached_then_expires():
     clock[0] = 601  # past the 10 min cache
     await check.ok(-100, 42)
     assert bot.calls == 2
+
+
+async def test_telegram_error_is_not_cached():
+    # Review fix (PR #55): a network blip must not lock a real member out for 10 min.
+    bot = FakeBot(fail=True)
+    check = MemberCheck(bot)
+    assert not await check.ok(-100, 42)
+    bot.fail = False
+    assert await check.ok(-100, 42)  # asked Telegram again, not the cache

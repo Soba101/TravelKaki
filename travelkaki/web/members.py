@@ -28,16 +28,18 @@ class MemberCheck:
         hit = self.cache.get(key)
         if hit and self.clock() - hit[0] < CACHE_SECONDS:
             return hit[1]
-        answer = await self._ask(chat_id, user_id)
-        self.cache[key] = (self.clock(), answer)
-        return answer
-
-    async def _ask(self, chat_id: int, user_id: int) -> bool:
         try:
             m = await self.bot.get_chat_member(chat_id, user_id)
         except TelegramError as e:
             # Unknown user, bot removed from the group, network hiccup: all mean "no".
+            # Not cached (PR #55 review): a blip must not lock a member out for 10 min.
             log.info("getChatMember failed for chat %s: %s", chat_id, e)
             return False
+        answer = self._in_chat(m)
+        self.cache[key] = (self.clock(), answer)
+        return answer
+
+    @staticmethod
+    def _in_chat(m) -> bool:
         # "restricted" users can still be in the group; Telegram says so with is_member.
         return m.status in IN_CHAT or (m.status == "restricted" and bool(m.is_member))

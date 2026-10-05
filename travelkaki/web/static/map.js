@@ -18,7 +18,9 @@ function openLink(url) {
 function esc(text) {
   const div = document.createElement("div");
   div.textContent = text == null ? "" : String(text);
-  return div.innerHTML;
+  // innerHTML escapes & < > but not quotes. We also use esc() inside attributes
+  // (data-url="..."), so escape quotes too (PR #55 review).
+  return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function tripId() {
