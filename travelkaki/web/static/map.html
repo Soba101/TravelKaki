@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- TravelKaki mini app: a map of the trip's saved places (M3, #24).
+     The page has no data in it. map.js fetches the trip from /api/trip/{id},
+     sending Telegram's signed initData so the server knows who is asking. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TravelKaki map</title>
+  <!-- Telegram's mini app script: gives us initData, theme colours, openLink. -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- Leaflet = free map library. Tiles come from OpenStreetMap.
+       integrity = the file's hash: the browser refuses a changed (hacked) CDN file (PR #55 review). -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <style>
+    /* Use Telegram's theme colours when we have them, so dark mode looks right. */
+    body { margin: 0; font: 15px system-ui, sans-serif;
+           background: var(--tg-theme-bg-color, #fff); color: var(--tg-theme-text-color, #222); }
+    #map { height: 70vh; }
+    #info { padding: 10px 14px; }
+    #info h3 { margin: 8px 0 4px; font-size: 15px; }
+    .legend span { display: inline-block; margin-right: 12px; }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; }
+    a { color: var(--tg-theme-link-color, #2a7ae2); }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="info">Loading…</div>
+  <script src="/static/map.js"></script>
+</body>
+</html>
