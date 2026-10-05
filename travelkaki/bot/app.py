@@ -16,6 +16,7 @@ from telegram.ext import (
 
 from travelkaki.bot.handlers import on_error, start
 from travelkaki.bot.links import add_command, on_message
+from travelkaki.bot.map import map_command
 from travelkaki.bot.plan import plan_command
 from travelkaki.bot.trip import newtrip
 from travelkaki.bot.votes import on_callback, places_command
@@ -30,6 +31,7 @@ COMMANDS = [
     BotCommand("add", "Add a link or a place by name"),
     BotCommand("places", "Saved places and votes"),
     BotCommand("plan", "Plan the days: /plan or /plan 10-22"),  # M2
+    BotCommand("map", "Open the trip map"),  # M3
 ]
 
 
@@ -53,6 +55,7 @@ def build_application(token: str, deps: Deps | None = None) -> Application:
     app.add_handler(CommandHandler("add", add_command, filters=NEW_ONLY))
     app.add_handler(CommandHandler("places", places_command, filters=NEW_ONLY))
     app.add_handler(CommandHandler("plan", plan_command, filters=NEW_ONLY))  # M2 planner
+    app.add_handler(CommandHandler("map", map_command, filters=NEW_ONLY))  # M3 mini app
     app.add_handler(CallbackQueryHandler(on_callback))  # vote / wrong place / retry buttons
     # M2: poll counts arrive here, so ask_group can close a poll early.
     app.add_handler(PollHandler(on_poll))

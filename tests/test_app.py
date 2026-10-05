@@ -6,8 +6,8 @@ from travelkaki.bot.app import COMMANDS, build_application
 
 
 def test_command_menu_lists_m1_commands():
-    # M2 added /plan to the menu.
-    assert {c.command for c in COMMANDS} == {"start", "newtrip", "add", "places", "plan"}
+    # M2 added /plan to the menu, M3 added /map.
+    assert {c.command for c in COMMANDS} == {"start", "newtrip", "add", "places", "plan", "map"}
 
 
 def test_application_registers_newtrip():

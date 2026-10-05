@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     # Optional cloud model, tried once per round if the local one fails. Empty = none.
     plan_fallback_model: str | None = None
 
+    # --- M3 settings (spec: docs/superpowers/specs/2026-10-05-m3-mini-app-map.md) ---
+
+    # The mini app's direct link from BotFather (/newapp), e.g. https://t.me/TravelKakiBot/map.
+    # Empty = /map says it isn't set up, and /plan posts no map button.
+    mini_app_url: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

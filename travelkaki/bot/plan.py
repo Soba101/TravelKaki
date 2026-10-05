@@ -17,6 +17,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from travelkaki.bot.cards import NO_TRIP
+from travelkaki.bot.map import map_markup
 from travelkaki.bot.plan_text import format_plan
 from travelkaki.bot.results import send
 from travelkaki.db import plan_queries as plq
@@ -121,6 +122,12 @@ async def run_plan(
         if not all(sent):  # never silent: keep the progress message and say so (review #3)
             await progress(FAILED, final=True)
             return
+        # Offer the map, where each day is a tab with its route (M3, #26).
+        markup = map_markup(deps.mini_app_url, inp.trip_id)
+        if markup is not None:
+            if not await send(bot, chat_id, "See the days on the map:", markup=markup):
+                # The plan is already posted; /map still works. Just note it (PR #57 review).
+                log.warning("map button not sent chat=%s", chat_id)
         try:
             await bot.delete_message(chat_id, progress_id)
         except TelegramError:
