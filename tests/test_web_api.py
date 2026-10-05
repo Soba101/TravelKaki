@@ -51,6 +51,7 @@ def test_trip_json_for_a_member(client):
     assert r.status_code == 200
     body = r.json()
     assert body["city"] == "Tokyo"
+    assert body["center"] is None  # this test trip has no city centre
     assert body["hotel"] == {"name": "Hotel X", "lat": 35.6, "lng": 139.7}
     ichiran, bar = body["places"]
     assert (ichiran["tier"], ichiran["must"], ichiran["lat"]) == ("must", 1, 35.7)
