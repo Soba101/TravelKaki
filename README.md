@@ -61,9 +61,10 @@ The map is a Telegram mini app served by this app at `/app`. Telegram needs a pu
 
 1. Start the bot (`docker compose up -d`). It listens on `127.0.0.1:8000`.
 2. Tunnel, e.g. Tailscale Funnel on the same machine: `tailscale funnel --bg 8000`.
+   First time: allow HTTPS and Funnel for your tailnet (the command prints a link to do it).
    Note the https URL it prints (`https://<machine>.<tailnet>.ts.net`).
-3. In BotFather: `/newapp` → pick the bot → Web App URL = `<that URL>/app`
-   → short name, e.g. `map`. You get a link like `https://t.me/<bot>/map`.
+3. In BotFather: `/newapp` → pick the bot → title, description, a 640×360 photo
+   (GIF optional) → Web App URL = `<that URL>/app` → short name, e.g. `map`. You get a link like `https://t.me/<bot>/map`.
 4. Put it in `.env`: `MINI_APP_URL=https://t.me/<bot>/map`, then restart.
 5. In the group: `/map`, or run `/plan` and tap "Open map".
 

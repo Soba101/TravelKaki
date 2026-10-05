@@ -118,7 +118,9 @@ function draw(trip) {
   const layer = L.layerGroup().addTo(map);  // cleared on every tab switch
   const tabs = document.getElementById("tabs");
   const views = [["All places", () => drawAll(map, layer, trip)]];
-  trip.days.forEach((d, i) => views.push([`Day ${i + 1}`, () => drawDay(map, layer, trip, d)]));
+  // Tabs show the date ("Sat 12 Dec"), not "Day N": free days aren't in the list,
+  // so a count would not match the /plan message's day numbers (PR #57 review).
+  trip.days.forEach((d) => views.push([d.label, () => drawDay(map, layer, trip, d)]));
 
   function show(i) {
     layer.clearLayers();

@@ -125,7 +125,9 @@ async def run_plan(
         # Offer the map, where each day is a tab with its route (M3, #26).
         markup = map_markup(deps.mini_app_url, inp.trip_id)
         if markup is not None:
-            await send(bot, chat_id, "See the days on the map:", markup=markup)
+            if not await send(bot, chat_id, "See the days on the map:", markup=markup):
+                # The plan is already posted; /map still works. Just note it (PR #57 review).
+                log.warning("map button not sent chat=%s", chat_id)
         try:
             await bot.delete_message(chat_id, progress_id)
         except TelegramError:

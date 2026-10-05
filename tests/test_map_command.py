@@ -47,3 +47,8 @@ async def test_map_command_not_set_up(sessions):
     update, context, message = _fake(sessions, None)
     await map_command(update, context)
     assert message.reply_text.await_args.args[0] == NOT_SET_UP
+
+
+def test_trailing_slash_is_ignored():
+    # PR #57 review: "https://t.me/Bot/map/" must not become ".../map/?startapp=7".
+    assert map_markup(URL + "/", 7).inline_keyboard[0][0].url == URL + "?startapp=7"

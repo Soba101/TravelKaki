@@ -24,6 +24,7 @@ def map_markup(url: str | None, trip_id: int) -> InlineKeyboardMarkup | None:
     """The Open map button, or None when MINI_APP_URL isn't set."""
     if not url:
         return None
+    url = url.rstrip("/")  # a trailing slash would break the link (PR #57 review)
     return InlineKeyboardMarkup([[InlineKeyboardButton(BUTTON, url=f"{url}?startapp={trip_id}")]])
 
 
