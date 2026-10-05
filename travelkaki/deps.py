@@ -29,6 +29,8 @@ class Deps:
     daily_cap: int = 100  # max LLM calls per trip per day
     # (source_id, chat_id) of links cut off by the last restart; offered a Retry at startup.
     interrupted: list[tuple[int, int]] = field(default_factory=list)
+    # Mini app direct link, e.g. https://t.me/TravelKakiBot/map. None = no map button (M3).
+    mini_app_url: str | None = None
 
 
 def build_deps(settings: Settings) -> Deps:
@@ -49,6 +51,7 @@ def build_deps(settings: Settings) -> Deps:
         fetch_caption=fetch_caption,
         daily_cap=settings.llm_daily_cap,
         interrupted=interrupted,
+        mini_app_url=settings.mini_app_url,
     )
 
 

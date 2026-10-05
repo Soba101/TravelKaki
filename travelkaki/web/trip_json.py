@@ -9,10 +9,11 @@ from travelkaki.bot.cards import maps_url
 from travelkaki.db.models import Trip
 from travelkaki.db.place_queries import places_with_counts
 from travelkaki.planner.rules import tier
+from travelkaki.web.days_json import days_json
 
 
 def trip_json(s: Session, trip: Trip) -> dict:
-    """City, hotel pin (or None) and every place with its votes and tier."""
+    """City, hotel pin (or None), every place with its votes and tier, and plan days."""
     hotel = None
     if trip.hotel_lat is not None and trip.hotel_lng is not None:
         hotel = {"name": trip.hotel or "Hotel", "lat": trip.hotel_lat, "lng": trip.hotel_lng}
@@ -35,4 +36,5 @@ def trip_json(s: Session, trip: Trip) -> dict:
                 "maps_url": maps_url(p, trip.city),
             }
         )
-    return {"city": trip.city, "hotel": hotel, "places": places}
+    # days = the latest /plan, for the day tabs (M3, #25). [] before the first /plan.
+    return {"city": trip.city, "hotel": hotel, "places": places, "days": days_json(s, trip)}

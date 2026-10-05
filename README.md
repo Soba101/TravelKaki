@@ -54,6 +54,21 @@ Live tests call your local Ollama and are skipped by default: `uv run pytest -m 
 **Linux hosts:** the container runs as a normal user (uid 1000). If the bot can't create its
 database, give that user the data folder: `mkdir -p data && sudo chown 1000:1000 data`.
 
+## Trip map (mini app)
+
+The map is a Telegram mini app served by this app at `/app`. Telegram needs a public
+**https** URL for it. No port forwarding needed: use a tunnel.
+
+1. Start the bot (`docker compose up -d`). It listens on `127.0.0.1:8000`.
+2. Tunnel, e.g. Tailscale Funnel on the same machine: `tailscale funnel --bg 8000`.
+   Note the https URL it prints (`https://<machine>.<tailnet>.ts.net`).
+3. In BotFather: `/newapp` → pick the bot → Web App URL = `<that URL>/app`
+   → short name, e.g. `map`. You get a link like `https://t.me/<bot>/map`.
+4. Put it in `.env`: `MINI_APP_URL=https://t.me/<bot>/map`, then restart.
+5. In the group: `/map`, or run `/plan` and tap "Open map".
+
+Only members of the trip's group can load its data (checked with Telegram on every visit).
+
 ## Self-hosting
 
 Coming in M5. See [Self Hosting](../../wiki/Self-Hosting).

@@ -182,3 +182,22 @@ async def test_plan_offers_ask_group(sessions):
     await tasks[0]
     assert "ask_group" in llm.seen[0][1]
     assert ctx.bot_data["polls"] == {}
+
+
+async def test_plan_posts_map_button_when_set_up(sessions):
+    # M3 (#26): after the plan, an "Open map" button, if MINI_APP_URL is set.
+    _trip(sessions)
+    update, ctx, tasks = _ctx(sessions)
+    ctx.bot_data["deps"].mini_app_url = "https://t.me/Bot/map"
+    await plan_command(update, ctx)
+    await tasks[0]
+    last = ctx.bot.send_message.await_args_list[-1].kwargs["reply_markup"]
+    assert last.inline_keyboard[0][0].url.startswith("https://t.me/Bot/map?startapp=")
+
+
+async def test_plan_without_map_url_has_no_button(sessions):
+    _trip(sessions)
+    update, ctx, tasks = _ctx(sessions)
+    await plan_command(update, ctx)
+    await tasks[0]
+    assert "See the days on the map:" not in _sent(ctx)
