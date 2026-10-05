@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from telegram.error import TelegramError
 
 from travelkaki.bot.app import build_application, register_commands
@@ -17,17 +18,25 @@ from travelkaki.bot.results import announce_interrupted
 from travelkaki.config import get_settings
 from travelkaki.deps import build_deps, close_deps
 from travelkaki.planner.ask import release_all
+from travelkaki.web.api import STATIC, router
+from travelkaki.web.members import MemberCheck
 
 log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start the bot before serving requests; stop it on shutdown."""
     settings = get_settings()  # fails fast with a clear error if the token is missing
 
     # Database + HTTP client, shared by the bot and (later) the API. (M1)
     deps = build_deps(settings)
+
+    # What the mini app API needs (M3, #23). Routes read these from request.app.state.
+    app.state.deps = deps
+    app.state.token = settings.telegram_bot_token  # to check initData signatures
+    # No bot = nobody can be checked as a group member, so the API says no to all.
+    app.state.members = _NoMembers()
 
     try:
         if not settings.run_bot:
@@ -36,6 +45,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             return
 
         bot = build_application(settings.telegram_bot_token, deps)
+        app.state.members = MemberCheck(bot.bot)  # real getChatMember checks (M3)
         # These 3 steps are the manual version of bot.run_polling(),
         # which we can't use because uvicorn already owns the event loop.
         await bot.initialize()
@@ -65,7 +75,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         await close_deps(deps)
 
 
+class _NoMembers:
+    """Member check used when RUN_BOT=false: refuses everyone (M3)."""
+
+    async def ok(self, chat_id: int, user_id: int) -> bool:
+        return False
+
+
 app = FastAPI(title="TravelKaki", lifespan=lifespan)
+app.include_router(router)  # mini app: /app page + /api/trip/{id} (M3)
+app.mount("/static", StaticFiles(directory=STATIC), name="static")  # map.js (M3)
 
 
 @app.get("/health")
