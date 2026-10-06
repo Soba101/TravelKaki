@@ -90,3 +90,37 @@ async def test_backfill_survives_one_bad_place(sessions):
     done, missed = await backfill(make_deps(sessions), BadGeo())
 
     assert (done, missed) == (1, 1)
+
+
+async def test_backfill_holds_no_session_while_waiting_on_geocoder(sessions):
+    """Issue #54 / PR #59: no DB session stays open across the slow Nominatim calls."""
+    _trip_with_unpinned(sessions, "Ichiran", "Tsukiji Market")
+    open_now, seen = [], []
+
+    def tracked():
+        # Wrap the session factory so we know how many sessions are open right now.
+        class Ctx:
+            def __enter__(self):
+                self.s = sessions().__enter__()
+                open_now.append(1)
+                return self.s
+
+            def __exit__(self, *exc):
+                open_now.pop()
+                return self.s.__exit__(*exc)
+
+        return Ctx()
+
+    class WatchGeo(FakeGeo):
+        async def search(self, query, box=None):
+            seen.append(len(open_now))
+            return await super().search(query, box)
+
+        async def locate(self, name, city, center):
+            seen.append(len(open_now))
+            return await super().locate(name, city, center)
+
+    done, missed = await backfill(make_deps(tracked), WatchGeo())
+
+    assert (done, missed) == (2, 0)
+    assert seen and all(n == 0 for n in seen)
