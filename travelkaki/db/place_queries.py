@@ -100,11 +100,17 @@ def clear_pin(s: Session, place_id: int) -> Place | None:
     return place
 
 
-def set_pin(s: Session, place_id: int, lat: float, lng: float) -> Place | None:
-    """/pin: save a pin the user sent as a Telegram location."""
+def set_pin(
+    s: Session, place_id: int, lat: float, lng: float, maps_link: str | None = None
+) -> Place | None:
+    """/pin: save a pin the user sent (location, coordinates or a Maps link).
+
+    maps_link is the Google Maps link they pasted; a pin without one clears the old link.
+    """
     place = s.get(Place, place_id)
     if place is not None:
         place.lat, place.lng, place.address = lat, lng, None
+        place.maps_link = maps_link
         # Not None = "checked": the pin backfill only touches places with NULL hours,
         # and it needs lat to be NULL too, so a manual pin is never overwritten.
         if place.opening_hours is None:

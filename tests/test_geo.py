@@ -143,3 +143,19 @@ async def test_locate_query_excludes_bracket_text():
     geo, _ = _geo(handler)
     await geo.locate("Shibuya Morimoto (Yakitori)", "Tokyo", TOKYO)
     assert requests[0].url.params["q"] == "Shibuya Morimoto, Tokyo"
+
+
+async def test_search_by_postcode_uses_structured_params():
+    seen = []
+
+    def handler(request):
+        seen.append(dict(request.url.params))
+        return httpx.Response(
+            200, json=[{"lat": "35.6922", "lon": "139.7042", "display_name": "x"}]
+        )
+
+    geo, _ = _geo(handler)
+    hit = await geo.search_postcode("160-0022", "Japan")
+    assert (hit.lat, hit.lng) == (35.6922, 139.7042)
+    assert seen[0]["postalcode"] == "160-0022" and seen[0]["country"] == "Japan"
+    assert "q" not in seen[0]

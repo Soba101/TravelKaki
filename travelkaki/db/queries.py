@@ -41,6 +41,20 @@ def upsert_trip(
     return trip
 
 
+def migrate_trip(s: Session, old_id: int, new_id: int) -> bool:
+    """Move a trip to a new chat id (group upgraded to supergroup). True if moved.
+
+    Safe to repeat: with no trip under old_id there is nothing to do. A trip that
+    already exists under new_id is never overwritten.
+    """
+    trip = get_trip(s, old_id)
+    if trip is None or get_trip(s, new_id) is not None:
+        return False
+    trip.chat_id = new_id
+    s.commit()
+    return True
+
+
 # ---------- sources (posted links) ----------
 
 

@@ -57,13 +57,28 @@ class Nominatim:
             "Accept-Language": "en",  # English addresses on the cards
         }
 
-    async def search(self, query: str, box: tuple | None = None) -> GeoResult | None:
-        """First match for `query` (inside `box` when given), or None."""
+    async def search_postcode(self, postcode: str, country: str) -> GeoResult | None:
+        """Centre of a postcode area (approximate): used when a link has no coordinates."""
+        return await self.search(
+            f"{country} {postcode}", structured={"postalcode": postcode, "country": country}
+        )
+
+    async def search(
+        self, query: str, box: tuple | None = None, structured: dict | None = None
+    ) -> GeoResult | None:
+        """First match for `query` (inside `box` when given), or None.
+
+        `structured` (postalcode/country...) replaces the free-text q; `query` is then
+        only the cache key.
+        """
         key = (query, box)
         if key in self._cache:
             return self._cache[key]
         # extratags=1 also returns OSM tags like opening_hours (M2 planner).
         params = {"q": query, "format": "jsonv2", "limit": 1, "extratags": 1}
+        if structured:
+            params.pop("q")
+            params |= structured
         if box:
             params |= {"viewbox": ",".join(str(x) for x in box), "bounded": 1}
         async with self._lock:

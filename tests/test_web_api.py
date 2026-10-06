@@ -55,7 +55,7 @@ def test_trip_json_for_a_member(client):
     assert body["hotel"] == {"name": "Hotel X", "lat": 35.6, "lng": 139.7}
     ichiran, bar = body["places"]
     assert (ichiran["tier"], ichiran["must"], ichiran["lat"]) == ("must", 1, 35.7)
-    assert ichiran["maps_url"].endswith("query=35.7,139.8")
+    assert ichiran["maps_url"].endswith("query=Ichiran%2C+Tokyo")
     assert (bar["tier"], bar["lat"]) == ("maybe", None)  # no votes = maybe, no pin
 
 

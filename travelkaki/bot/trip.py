@@ -140,3 +140,21 @@ async def newtrip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         f"✈️ Trip set: {_describe(trip)}\nNow drop TikTok or Instagram links here!"
     )
+
+
+async def on_migrate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The group became a supergroup: its chat id changed, so move the trip.
+
+    Telegram sends two service messages: migrate_to_chat_id (in the old chat) and
+    migrate_from_chat_id (in the new one). Either one is enough; repeating is harmless.
+    """
+    message, chat_id = update.effective_message, update.effective_chat.id
+    if message.migrate_to_chat_id:  # seen in the old chat
+        old, new = chat_id, message.migrate_to_chat_id
+    elif message.migrate_from_chat_id:  # seen in the new chat
+        old, new = message.migrate_from_chat_id, chat_id
+    else:
+        return
+    with context.bot_data["deps"].sessions() as s:
+        moved = queries.migrate_trip(s, old, new)
+    log.info("chat migrated old=%s new=%s trip_moved=%s", old, new, moved)
