@@ -23,11 +23,16 @@ _DAY_PART = rf"{_DAY}(?:-{_DAY})?"
 _TIME = r"\d\d:\d\d-\d\d:\d\d"
 # One rule: optional day list, then a time list or off/closed. Nothing else allowed.
 _RULE = re.compile(rf"^(?:({_DAY_PART}(?:,{_DAY_PART})*)\s+)?({_TIME}(?:,{_TIME})*|off|closed)$")
+# A public (PH) or school (SH) holiday rule, e.g. "PH off". We skip these.
+_HOLIDAY = re.compile(r"^(?:PH|SH)\b")
 
 
 def _minutes(hhmm: str) -> int:
-    h, m = hhmm.split(":")
-    return int(h) * 60 + int(m)
+    h, m = (int(x) for x in hhmm.split(":"))
+    # Hours 0-23 and minutes 0-59; "24:00" (end of day) is the one allowed exception.
+    if m > 59 or h > 24 or (h == 24 and m != 0):
+        raise ValueError(f"bad time {hhmm}")
+    return h * 60 + m
 
 
 def _days(text: str | None) -> list[int]:
@@ -49,7 +54,9 @@ def _intervals(text: str) -> list[tuple[int, int]]:
     out = []
     for span in text.split(","):
         start, end = (_minutes(t) for t in span.split("-"))
-        if end <= start:
+        if end == start:
+            raise ValueError("start equals end")  # would mean 24 h open; don't guess
+        if end < start:
             end += 1440  # closes after midnight
         out.append((start, end))
     return out
@@ -64,17 +71,24 @@ def parse(raw: str | None) -> dict[int, list[tuple[int, int]]] | None:
     if raw == "24/7":
         return {d: [(0, 1440)] for d in range(7)}
     week: dict[int, list[tuple[int, int]]] = {d: [] for d in range(7)}  # unlisted = closed
+    seen_rule = False
     for rule in raw.split(";"):
         rule = rule.strip()
         if not rule:
             continue
+        if _HOLIDAY.match(rule):
+            continue  # public/school holiday rules: ignored, the rest still parses
         match = _RULE.match(rule)
         if match is None:
             return None  # a form we don't support -> unknown
-        times = _intervals(match.group(2))
+        try:
+            times = _intervals(match.group(2))
+        except ValueError:
+            return None  # impossible clock time or start == end -> unknown
+        seen_rule = True
         for d in _days(match.group(1)):
             week[d] = times  # later rules override earlier ones
-    return week
+    return week if seen_rule else None  # empty / holiday-only string -> unknown
 
 
 def _around(week: dict, weekday: int) -> list[tuple[int, int]]:

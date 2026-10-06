@@ -90,3 +90,23 @@ def test_open_through_respects_breaks():
     assert open_through("24/7", 0, 1380, 1500) is True  # 23:00-01:00
     assert open_through("Mo-Su 18:00-02:00", 0, 1400, 1500) is True
     assert open_through(None, 0, 600, 700) is None
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["Mo-Fr 25:00-18:00", "10:60-18:00", "10:00-18:60", "Mo-Su 10:00-10:00", ";", " ; ;"],
+)
+def test_malformed_times_and_empty_rules_are_unknown(raw):
+    """Issue #54: bad clock values, equal start/end and empty rules -> unknown, not wrong data."""
+    assert parse(raw) is None
+
+
+def test_24_00_end_is_still_fine():
+    assert parse("Mo-Su 10:00-24:00")[0] == [(600, 1440)]
+
+
+def test_public_and_school_holiday_rules_are_ignored():
+    """Issue #54: a trailing 'PH off' must not make the whole string unknown."""
+    assert parse("Mo-Fr 10:00-22:00; PH off")[0] == [(600, 1320)]
+    assert parse("Mo-Fr 10:00-22:00; PH 11:00-18:00; SH off")[0] == [(600, 1320)]
+    assert parse("PH off") is None  # nothing left to read

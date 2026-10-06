@@ -24,40 +24,52 @@ log = logging.getLogger(__name__)
 
 
 async def backfill(deps: Deps, geo) -> tuple[int, int]:
-    """Pin every place that was never geocoded. Returns (pinned, not found)."""
+    """Pin every place that was never geocoded. Returns (pinned, not found).
+
+    Each DB read and write uses its own short session. No session stays open while
+    we wait on Nominatim (1 s sleeps), so a bot write in between can't be overwritten.
+    """
     done = missed = 0
     with deps.sessions() as s:
-        trips = s.scalars(select(Trip)).all()
-        for trip in trips:
-            # "Never geocoded" = no pin AND hours never checked. A place whose pin was
-            # removed with "Wrong place" has hours set, so we leave it alone.
-            todo = s.scalars(
-                select(Place).where(
-                    Place.trip_id == trip.id, Place.lat.is_(None), Place.opening_hours.is_(None)
+        trips = [(t.id, t.city, t.city_lat, t.city_lng) for t in s.scalars(select(Trip))]
+    for trip_id, city_name, lat, lng in trips:
+        # "Never geocoded" = no pin AND hours never checked. A place whose pin was
+        # removed with "Wrong place" has hours set, so we leave it alone.
+        with deps.sessions() as s:
+            todo = [
+                (p.id, p.name)
+                for p in s.scalars(
+                    select(Place).where(
+                        Place.trip_id == trip_id, Place.lat.is_(None), Place.opening_hours.is_(None)
+                    )
                 )
-            ).all()
-            if not todo:
-                continue
-            if trip.city_lat is None:  # pin the city first: searches are kept near it
-                city = await geo.search(trip.city)
-                if city:
-                    trip.city_lat, trip.city_lng = city.lat, city.lng
-            centre = (trip.city_lat, trip.city_lng) if trip.city_lat is not None else None
-            s.commit()  # keep the city pin
-            for place in todo:
-                try:
-                    hit, confidence = await geo.locate(place.name, trip.city, centre)
-                    if hit is None:  # leave it unpinned; the next run tries again
-                        missed += 1
-                        continue
+            ]
+        if not todo:
+            continue
+        if lat is None:  # pin the city first: searches are kept near it
+            city = await geo.search(city_name)
+            if city:
+                lat, lng = city.lat, city.lng
+                with deps.sessions() as s:
+                    trip = s.get(Trip, trip_id)
+                    trip.city_lat, trip.city_lng = lat, lng
+                    s.commit()  # keep the city pin
+        centre = (lat, lng) if lat is not None else None
+        for place_id, name in todo:
+            try:
+                hit, confidence = await geo.locate(name, city_name, centre)
+                if hit is None:  # leave it unpinned; the next run tries again
+                    missed += 1
+                    continue
+                with deps.sessions() as s:  # short session: re-read, write, commit
+                    place = s.get(Place, place_id)
                     place.lat, place.lng, place.address = hit.lat, hit.lng, hit.address
                     place.confidence, place.opening_hours = confidence, hit.opening_hours or ""
                     s.commit()  # per place, so a crash keeps what was done
-                    done += 1
-                except Exception:  # one odd response must not lose the whole run
-                    s.rollback()
-                    log.exception("backfill failed for place %s", place.id)
-                    missed += 1
+                done += 1
+            except Exception:  # one odd response must not lose the whole run
+                log.exception("backfill failed for place %s", place_id)
+                missed += 1
     return done, missed
 
 
