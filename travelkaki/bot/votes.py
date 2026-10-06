@@ -11,6 +11,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from travelkaki.bot.cards import NO_TRIP, list_keyboard, parse_callback, places_text
+from travelkaki.bot.pin import pick
 from travelkaki.bot.results import post_pipeline, send
 from travelkaki.db import place_queries as pq
 from travelkaki.db import queries
@@ -108,6 +109,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await _vote(query, chat_id, item_id, arg, deps)
     elif kind == "w":
         await _wrong_place(query, chat_id, item_id, deps)
+    elif kind == "p":
+        await pick(query, chat_id, item_id, context, deps)  # /pin button
     else:
         await _retry(query, chat_id, item_id, context, deps)
 

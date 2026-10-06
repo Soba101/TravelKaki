@@ -130,13 +130,13 @@ def places_text(rows: list[tuple[Place, VoteCounts]], city: str) -> list[str]:
 
 
 def parse_callback(data: str) -> tuple[str, int, str | None] | None:
-    """'v:12:m' -> ('v', 12, 'm'); 'w:3' / 'r:4' -> (kind, id, None). Bad data -> None."""
+    """'v:12:m' -> ('v', 12, 'm'); 'w:3' / 'r:4' / 'p:5' -> (kind, id, None). Bad data -> None."""
     parts = (data or "").split(":")
     if len(parts) < 2 or not parts[1].isdigit():
         return None
     kind, item_id = parts[0], int(parts[1])
     if kind == "v" and len(parts) == 3 and parts[2] in ("m", "y", "s"):
         return kind, item_id, parts[2]
-    if kind in ("w", "r") and len(parts) == 2:
+    if kind in ("w", "r", "p") and len(parts) == 2:  # p = /pin choice
         return kind, item_id, None
     return None
