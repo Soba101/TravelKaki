@@ -92,6 +92,9 @@ def clear_pin(s: Session, place_id: int) -> Place | None:
     place = s.get(Place, place_id)
     if place is not None:
         place.lat = place.lng = place.address = None
+        # "" = checked. Pre-M2 places have NULL hours, which the pin backfill reads
+        # as "never geocoded" and would re-pin the place the user just rejected (#54).
+        place.opening_hours = ""
         place.confidence = Confidence.none
         s.commit()
     return place
