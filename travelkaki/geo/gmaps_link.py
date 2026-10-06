@@ -16,6 +16,7 @@ URL_RE = re.compile(r"https?://\S+")
 # Priority 1: the actual place pin. Priority 2: the map viewport centre.
 PLACE_RE = re.compile(r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)")
 AT_RE = re.compile(r"@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)")
+POSTCODE_JP_RE = re.compile(r"\b\d{3}-\d{4}\b")
 PAIR_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 
 
@@ -37,6 +38,32 @@ def parse_coords(url: str) -> tuple[float, float] | None:
             if m:
                 return _valid(float(m.group(1)), float(m.group(2)))
     return None
+
+
+def parse_text_coords(text: str) -> tuple[float, float] | None:
+    """(lat, lng) from a message that is only coordinates, e.g. "35.6905, 139.7066"."""
+    m = PAIR_RE.match(text or "")
+    return _valid(float(m.group(1)), float(m.group(2))) if m else None
+
+
+def query_text(url: str) -> str | None:
+    """The place text in q=/query= (e.g. name + address), or None if absent or numeric."""
+    params = parse_qs(urlparse(url).query)  # also turns + into spaces
+    for key in ("q", "query"):
+        for value in params.get(key, []):
+            if value.strip() and not PAIR_RE.match(value):
+                return value.strip()
+    return None
+
+
+def postcode_and_country(text: str) -> tuple[str, str] | None:
+    """Japan postcode (160-0022) plus the country (last comma part) from address text.
+
+    Only Japan for now; other countries can be added here.
+    """
+    m = POSTCODE_JP_RE.search(text)
+    country = text.rsplit(",", 1)[-1].strip()
+    return (m.group(0), country) if m and country.lower() == "japan" else None
 
 
 def is_short(url: str) -> bool:

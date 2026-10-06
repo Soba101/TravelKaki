@@ -264,6 +264,79 @@ async def test_prompt_text_mentions_links(sessions):
     ctx, q = _ctx(sessions), _tap(f"p:{place.id}")
     await pin.pick(q, 1, place.id, ctx, ctx.bot_data["deps"])
     assert (
-        "Google Maps link or a Telegram location for Tiny Shop"
+        "Google Maps link, coordinates (lat, lng), or a Telegram location for Tiny Shop"
         in (ctx.bot.send_message.await_args.args[1])
     )
+
+
+RAMEN_URL = (
+    "https://www.google.com/maps?q=Ramen+Afro+Beats+Shinjuku,+103+1+Chome-16-10+Shinjuku,"
+    "+Shinjuku+City,+Tokyo+160-0022,+Japan&ftid=0x60188dac4c941cd3:0x37e3afb8ba57e79e&entry=gps"
+)
+
+
+class FakeGeo:
+    """search() answers by query text; search_postcode() records its arguments."""
+
+    def __init__(self, by_text=None, by_postcode=None):
+        self.by_text, self.by_postcode, self.postcode_args = by_text, by_postcode, None
+
+    async def search(self, query, box=None):
+        return self.by_text
+
+    async def search_postcode(self, postcode, country):
+        self.postcode_args = (postcode, country)
+        return self.by_postcode
+
+
+async def _ramen(sessions, monkeypatch, geo):
+    place = _place(sessions)
+    ctx = _ctx(sessions)
+    ctx.bot_data["deps"].geo = geo
+    ctx.chat_data["pin_prompts"] = {55: place.id}
+    monkeypatch.setattr(pin.gmaps_link, "resolve", AsyncMock(return_value=RAMEN_URL))
+    update, msg = _text_reply(55, "https://maps.app.goo.gl/1YBXvucixP6gjGkD8")
+    with pytest.raises(ApplicationHandlerStop):
+        await pin.on_link(update, ctx)
+    return place, ctx, msg
+
+
+async def test_text_link_uses_geocoder_on_query(sessions, monkeypatch):
+    hit = SimpleNamespace(lat=35.69, lng=139.70)
+    geo = FakeGeo(by_text=hit)
+    place, ctx, msg = await _ramen(sessions, monkeypatch, geo)
+    with sessions() as s:
+        assert pq.get_place(s, place.id).lat == 35.69
+    assert "approximate" not in msg.reply_text.await_args.args[0]
+    assert geo.postcode_args is None
+
+
+async def test_text_link_falls_back_to_postcode(sessions, monkeypatch):
+    geo = FakeGeo(by_postcode=SimpleNamespace(lat=35.6922, lng=139.7042))
+    place, ctx, msg = await _ramen(sessions, monkeypatch, geo)
+    assert geo.postcode_args == ("160-0022", "Japan")
+    with sessions() as s:
+        assert pq.get_place(s, place.id).lat == 35.6922
+    text = msg.reply_text.await_args.args[0]
+    assert "Pinned Tiny Shop (approximate, from the postcode)" in text
+    assert "Wrong place" in text
+    assert ctx.chat_data["pin_prompts"] == {}
+
+
+async def test_text_link_nothing_found_keeps_prompt(sessions, monkeypatch):
+    place, ctx, msg = await _ramen(sessions, monkeypatch, FakeGeo())
+    assert "Couldn't read a location" in msg.reply_text.await_args.args[0]
+    assert ctx.chat_data["pin_prompts"] == {55: place.id}
+
+
+async def test_plain_coordinates_reply(sessions):
+    place = _place(sessions)
+    ctx = _ctx(sessions)
+    ctx.chat_data["pin_prompts"] = {55: place.id}
+    update, msg = _text_reply(55, "35.6905, 139.7066")
+    with pytest.raises(ApplicationHandlerStop):
+        await pin.on_link(update, ctx)
+    with sessions() as s:
+        saved = pq.get_place(s, place.id)
+        assert (saved.lat, saved.lng) == (35.6905, 139.7066)
+    assert "Pinned Tiny Shop" in msg.reply_text.await_args.args[0]

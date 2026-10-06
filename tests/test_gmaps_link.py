@@ -71,3 +71,33 @@ async def test_resolve_failure_returns_input():
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     assert await g.resolve("https://maps.app.goo.gl/abc", client) == "https://maps.app.goo.gl/abc"
+
+
+# A real app share link, after redirects: no coordinates, only the place text.
+RAMEN = (
+    "https://www.google.com/maps?q=Ramen+Afro+Beats+Shinjuku,+103+1+Chome-16-10+Shinjuku,"
+    "+Shinjuku+City,+Tokyo+160-0022,+Japan&ftid=0x60188dac4c941cd3:0x37e3afb8ba57e79e"
+    "&entry=gps&g_ep=abc&shh=1"
+)
+
+
+def test_text_query_has_no_coords():
+    assert g.parse_coords(RAMEN) is None
+    assert g.query_text(RAMEN).startswith("Ramen Afro Beats Shinjuku, 103 1 Chome-16-10")
+
+
+def test_query_text_ignores_coordinates_and_missing():
+    assert g.query_text("https://maps.google.com/?q=35.1,139.2") is None
+    assert g.query_text(PLACE) is None
+
+
+def test_postcode_and_country():
+    assert g.postcode_and_country(g.query_text(RAMEN)) == ("160-0022", "Japan")
+    assert g.postcode_and_country("Some Shop, Paris, France") is None
+
+
+def test_parse_text_coords():
+    assert g.parse_text_coords("35.6905, 139.7066") == (35.6905, 139.7066)
+    assert g.parse_text_coords(" -33.86,151.21 ") == (-33.86, 151.21)
+    assert g.parse_text_coords("95, 10") is None
+    assert g.parse_text_coords("meet at 35.6, 139.7 ok") is None
