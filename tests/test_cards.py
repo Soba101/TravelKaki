@@ -76,10 +76,20 @@ def test_list_keyboard_one_row_per_place():
 
 
 def test_maps_url():
-    assert maps_url(_place(lat=35.5, lng=139.25), "Tokyo").endswith("query=35.5,139.25")
+    # Never lat/lng only: a pinned place still links by name, so Google shows the shop.
+    assert maps_url(_place(lat=35.5, lng=139.25), "Tokyo").endswith("query=Ichiran%2C+Tokyo")
     assert maps_url(_place(name="Ichiran Shibuya"), "Tokyo").endswith(
         "query=Ichiran+Shibuya%2C+Tokyo"
     )
+    assert maps_url(_place(name="Torikizoku (Yakitori)"), "Tokyo").endswith(
+        "query=Torikizoku%2C+Tokyo"
+    )
+
+
+def test_maps_url_prefers_the_link_the_user_pinned_with():
+    place = _place(lat=35.5, lng=139.25)
+    place.maps_link = "https://maps.app.goo.gl/abc123"
+    assert maps_url(place, "Tokyo") == "https://maps.app.goo.gl/abc123"
 
 
 def test_every_pipeline_error_has_a_message():

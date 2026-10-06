@@ -12,6 +12,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from travelkaki.db.models import Confidence, Place
 from travelkaki.db.place_queries import VoteCounts
+from travelkaki.geo.nominatim import clean_name
 
 TELEGRAM_LIMIT = 4096  # max characters in one message
 PLATFORM_NAMES = {"tiktok": "TikTok", "instagram": "Instagram"}
@@ -34,11 +35,14 @@ def error_text(code: str, bot_username: str) -> str:
 
 
 def maps_url(place: Place, city: str) -> str:
-    """Google Maps search link: exact pin if we have one, else name + city."""
-    if place.lat is not None and place.lng is not None:
-        query = f"{place.lat},{place.lng}"
-    else:
-        query = quote_plus(f"{place.name}, {city}")
+    """Google Maps link for a place. The one helper for bot cards and the mini app.
+
+    The link the user pinned with wins. Otherwise a NAME search, never lat/lng only:
+    raw coordinates open Maps at a bare point instead of the shop.
+    """
+    if place.maps_link:
+        return place.maps_link
+    query = quote_plus(f"{clean_name(place.name)}, {city}")
     return f"https://www.google.com/maps/search/?api=1&query={query}"
 
 

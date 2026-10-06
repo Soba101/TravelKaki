@@ -137,8 +137,9 @@ async def on_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         name = place.name if place else None
     if name is None:
         return
-    approximate = False
+    approximate, link = False, None
     if coords is None:
+        link = url  # keep the original link: Maps buttons open it
         if gmaps_link.is_short(url):
             url = await gmaps_link.resolve(url)  # follow the redirect to the full link
         coords = gmaps_link.parse_coords(url)
@@ -151,7 +152,7 @@ async def on_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         raise ApplicationHandlerStop
     with deps.sessions() as s:
-        pq.set_pin(s, place_id, *coords)
+        pq.set_pin(s, place_id, *coords, maps_link=link)
     prompts.pop(replied.message_id, None)  # one reply per prompt
     log.info("pin set from link chat=%s place=%s", chat_id, place_id)
     if approximate:

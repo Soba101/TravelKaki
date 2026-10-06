@@ -340,3 +340,24 @@ async def test_plain_coordinates_reply(sessions):
         saved = pq.get_place(s, place.id)
         assert (saved.lat, saved.lng) == (35.6905, 139.7066)
     assert "Pinned Tiny Shop" in msg.reply_text.await_args.args[0]
+
+
+async def test_link_pin_saves_the_original_link(sessions, monkeypatch):
+    place = _place(sessions)
+    ctx = _ctx(sessions)
+    ctx.chat_data["pin_prompts"] = {55: place.id}
+    short = "https://maps.app.goo.gl/abc123"
+    monkeypatch.setattr(pin.gmaps_link, "resolve", AsyncMock(return_value=PLACE_URL))
+    update, _ = _text_reply(55, short)
+    with pytest.raises(ApplicationHandlerStop):
+        await pin.on_link(update, ctx)
+    with sessions() as s:
+        assert pq.get_place(s, place.id).maps_link == short
+
+
+async def test_coordinate_and_location_pins_clear_the_link(sessions):
+    place = _place(sessions)
+    with sessions() as s:
+        pq.set_pin(s, place.id, 1.0, 2.0, "https://maps.app.goo.gl/old")
+        pq.set_pin(s, place.id, 3.0, 4.0)  # a later pin without a link
+        assert pq.get_place(s, place.id).maps_link is None

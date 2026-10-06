@@ -92,6 +92,8 @@ class Place(Base):
     # M2: raw OSM opening hours, e.g. "Mo-Fr 10:00-22:00".
     # None = never checked. "" = checked, but OSM has no hours for it.
     opening_hours: Mapped[str | None]
+    # The Google Maps link the user pinned with (/pin); Maps buttons prefer it. None = none.
+    maps_link: Mapped[str | None]
 
 
 class PlaceSource(Base):
