@@ -7,7 +7,7 @@ import pytest
 from telegram.ext import ApplicationHandlerStop
 
 from tests.fakes import make_deps, make_source
-from travelkaki.bot import pin
+from travelkaki.bot import pin, pin_confirm
 from travelkaki.bot.cards import parse_callback
 from travelkaki.db import place_queries as pq
 from travelkaki.db import queries
@@ -46,6 +46,7 @@ def _buttons(message):
 def _tap(data, chat_id=1):
     q = SimpleNamespace(data=data, message=SimpleNamespace(chat=SimpleNamespace(id=chat_id)))
     q.answer = AsyncMock()
+    q.edit_message_text = AsyncMock()
     return q
 
 
@@ -193,7 +194,9 @@ async def test_location_reply_in_wrong_chat_is_ignored(sessions):
         assert pq.get_place(s, place.id).lat is None
 
 
-PLACE_URL = "https://www.google.com/maps/place/X/@35.69,139.70,17z/data=!3d35.6938!4d139.7034"
+PLACE_URL = (
+    "https://www.google.com/maps/place/Tiny+Shop/@35.69,139.70,17z/data=!3d35.6938!4d139.7034"
+)
 
 
 async def test_link_reply_saves_pin(sessions):
@@ -290,7 +293,7 @@ class FakeGeo:
 
 
 async def _ramen(sessions, monkeypatch, geo):
-    place = _place(sessions)
+    place = _place(sessions, name="Ramen Afro Beats")
     ctx = _ctx(sessions)
     ctx.bot_data["deps"].geo = geo
     ctx.chat_data["pin_prompts"] = {55: place.id}
@@ -318,7 +321,7 @@ async def test_text_link_falls_back_to_postcode(sessions, monkeypatch):
     with sessions() as s:
         assert pq.get_place(s, place.id).lat == 35.6922
     text = msg.reply_text.await_args.args[0]
-    assert "Pinned Tiny Shop (approximate, from the postcode)" in text
+    assert "Pinned Ramen Afro Beats (approximate, from the postcode)" in text
     assert "Wrong place" in text
     assert ctx.chat_data["pin_prompts"] == {}
 
@@ -361,3 +364,99 @@ async def test_coordinate_and_location_pins_clear_the_link(sessions):
         pq.set_pin(s, place.id, 1.0, 2.0, "https://maps.app.goo.gl/old")
         pq.set_pin(s, place.id, 3.0, 4.0)  # a later pin without a link
         assert pq.get_place(s, place.id).maps_link is None
+
+
+def _mismatch_ctx(sessions):
+    """A prompt for 'Ramen Ushio' answered with a link to another shop."""
+    place = _place(sessions, name="Ramen Ushio")
+    ctx = _ctx(sessions)
+    ctx.chat_data["pin_prompts"] = {55: place.id}
+    return place, ctx
+
+
+async def _send_other_shop(ctx):
+    update, msg = _text_reply(55, PLACE_URL.replace("Tiny+Shop", "Ramen+Afro+Beats+Shinjuku"))
+    with pytest.raises(ApplicationHandlerStop):
+        await pin.on_link(update, ctx)
+    return msg
+
+
+def _tap_confirm(data, ctx, sessions):
+    q = _tap(data)
+    return q, pin_confirm.on_confirm(q, 1, int(data.split(":")[1]), data[0] == "y", ctx)
+
+
+async def test_name_mismatch_asks_and_does_not_save(sessions):
+    place, ctx = _mismatch_ctx(sessions)
+    msg = await _send_other_shop(ctx)
+    text = msg.reply_text.await_args.args[0]
+    assert "Ramen Afro Beats Shinjuku" in text and "Ramen Ushio" in text
+    buttons = [
+        b for row in msg.reply_text.await_args.kwargs["reply_markup"].inline_keyboard for b in row
+    ]
+    assert [b.text for b in buttons] == ["Yes, pin it", "No"]
+    assert [b.callback_data for b in buttons] == [f"y:{place.id}", f"n:{place.id}"]
+    with sessions() as s:
+        assert pq.get_place(s, place.id).lat is None
+    assert ctx.chat_data["pin_prompts"] == {55: place.id}
+
+
+async def test_confirm_yes_saves_with_link(sessions):
+    place, ctx = _mismatch_ctx(sessions)
+    await _send_other_shop(ctx)
+    q, call = _tap_confirm(f"y:{place.id}", ctx, sessions)
+    await call
+    with sessions() as s:
+        saved = pq.get_place(s, place.id)
+        assert (saved.lat, saved.lng) == (35.6938, 139.7034)
+        assert "Ramen+Afro+Beats+Shinjuku" in saved.maps_link
+    assert ctx.chat_data["pin_prompts"] == {}
+    assert ctx.chat_data["pin_pending"] == {}
+
+
+async def test_confirm_no_saves_nothing_and_keeps_prompt(sessions):
+    place, ctx = _mismatch_ctx(sessions)
+    await _send_other_shop(ctx)
+    q, call = _tap_confirm(f"n:{place.id}", ctx, sessions)
+    await call
+    with sessions() as s:
+        assert pq.get_place(s, place.id).lat is None
+    assert ctx.chat_data["pin_prompts"] == {55: place.id}
+    assert "right link" in q.edit_message_text.await_args.args[0]
+
+
+async def test_confirm_without_pending_is_gone(sessions):
+    place, ctx = _mismatch_ctx(sessions)
+    q, call = _tap_confirm(f"y:{place.id}", ctx, sessions)
+    await call
+    with sessions() as s:
+        assert pq.get_place(s, place.id).lat is None
+
+
+async def test_matching_name_saves_directly(sessions):
+    place = _place(sessions, name="Ramen Ushio (Shinjuku)")
+    ctx = _ctx(sessions)
+    ctx.chat_data["pin_prompts"] = {55: place.id}
+    update, _ = _text_reply(55, PLACE_URL.replace("Tiny+Shop", "Ushio+Shinjuku"))
+    with pytest.raises(ApplicationHandlerStop):
+        await pin.on_link(update, ctx)
+    with sessions() as s:
+        assert pq.get_place(s, place.id).lat == 35.6938
+
+
+async def test_far_pin_is_refused_for_every_pin_type(sessions):
+    place = _place(sessions)
+    with sessions() as s:
+        queries.upsert_trip(s, 1, "Singapore", None, None, None, 1.35, 103.82)  # Tokyo link
+    ctx = _ctx(sessions)
+    ctx.chat_data["pin_prompts"] = {55: place.id}
+    update, msg = _text_reply(55, PLACE_URL)
+    with pytest.raises(ApplicationHandlerStop):
+        await pin.on_link(update, ctx)
+    assert "far from Singapore" in msg.reply_text.await_args.args[0]
+    update, msg = _reply(55, location=SimpleNamespace(latitude=35.6, longitude=139.7))
+    await pin.on_location(update, ctx)
+    assert "far from Singapore" in msg.reply_text.await_args.args[0]
+    with sessions() as s:
+        assert pq.get_place(s, place.id).lat is None
+    assert ctx.chat_data["pin_prompts"] == {55: place.id}  # still usable

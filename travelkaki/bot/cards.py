@@ -141,6 +141,6 @@ def parse_callback(data: str) -> tuple[str, int, str | None] | None:
     kind, item_id = parts[0], int(parts[1])
     if kind == "v" and len(parts) == 3 and parts[2] in ("m", "y", "s"):
         return kind, item_id, parts[2]
-    if kind in ("w", "r", "p") and len(parts) == 2:  # p = /pin choice
+    if kind in ("w", "r", "p", "y", "n") and len(parts) == 2:  # p = /pin choice, y/n = pin confirm
         return kind, item_id, None
     return None

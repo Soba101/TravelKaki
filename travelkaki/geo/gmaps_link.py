@@ -6,9 +6,11 @@ Google Maps link instead. Short links are expanded by following redirects first.
 
 import logging
 import re
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, unquote_plus, urlparse
 
 import httpx
+
+from travelkaki.geo.nominatim import clean_name
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +66,47 @@ def postcode_and_country(text: str) -> tuple[str, str] | None:
     m = POSTCODE_JP_RE.search(text)
     country = text.rsplit(",", 1)[-1].strip()
     return (m.group(0), country) if m and country.lower() == "japan" else None
+
+
+async def geocode_text(geo, text: str | None):
+    """(coords or None, approximate?) for place text: full text first, then the postcode."""
+    if geo is None or not text:
+        return None, False
+    hit = await geo.search(text)
+    if hit:
+        return (hit.lat, hit.lng), False
+    pc = postcode_and_country(text)
+    hit = await geo.search_postcode(*pc) if pc else None
+    return ((hit.lat, hit.lng), True) if hit else (None, False)
+
+
+# Words too common to tell two places apart, plus a few big Tokyo areas.
+GENERIC = {
+    "the", "a", "and", "ramen", "sushi", "cafe", "coffee", "restaurant", "bar", "izakaya",
+    "yakitori", "omakase", "shop", "store", "tokyo", "shinjuku", "shibuya", "ginza",
+    "asakusa", "ueno", "ikebukuro", "akihabara",
+}  # fmt: skip
+
+
+def link_name(url: str) -> str | None:
+    """The place name in a Maps link: /place/<Name>/ or the first comma part of q=."""
+    m = re.search(r"/maps/place/([^/@?]+)", url)
+    if m:
+        return unquote_plus(m.group(1)).strip() or None
+    text = query_text(url)
+    return text.split(",")[0].strip() if text else None
+
+
+def _words(name: str, city: str) -> set[str]:
+    """Distinctive lowercase words of a name (brackets, generic words and the city dropped)."""
+    skip = GENERIC | set(re.findall(r"\w+", city.lower()))
+    return {w for w in re.findall(r"\w+", clean_name(name).lower()) if w not in skip}
+
+
+def names_match(shown: str, saved: str, city: str) -> bool:
+    """Do two names share a distinctive word? Nothing distinctive left = can't judge = True."""
+    a, b = _words(shown, city), _words(saved, city)
+    return not a or not b or bool(a & b)
 
 
 def is_short(url: str) -> bool:

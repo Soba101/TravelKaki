@@ -101,3 +101,20 @@ def test_parse_text_coords():
     assert g.parse_text_coords(" -33.86,151.21 ") == (-33.86, 151.21)
     assert g.parse_text_coords("95, 10") is None
     assert g.parse_text_coords("meet at 35.6, 139.7 ok") is None
+
+
+def test_link_name():
+    assert g.link_name(PLACE.replace("/Name/", "/Ramen+Afro%20Beats/")) == "Ramen Afro Beats"
+    assert g.link_name(RAMEN) == "Ramen Afro Beats Shinjuku"
+    assert g.link_name("https://maps.google.com/?q=35.1,139.2") is None
+    assert g.link_name("https://maps.app.goo.gl/abc") is None
+
+
+def test_names_match():
+    ok = g.names_match
+    assert not ok("Ramen Afro Beats Shinjuku", "Ramen Ushio", "Tokyo")
+    assert ok("Ushio Shinjuku", "Ramen Ushio (Shinjuku)", "Tokyo")  # one shared word
+    assert ok("Ramen", "Ramen Ushio", "Tokyo")  # nothing distinctive: can't judge
+    assert ok("Ichiran Shibuya", "Ichiran Ramen", "Tokyo")
+    assert ok("Tokyo Cafe", "Blue Bottle Coffee", "Tokyo")  # city + generic words dropped
+    assert not ok("Blue Bottle", "Kiyosumi Coffee", "Tokyo")
