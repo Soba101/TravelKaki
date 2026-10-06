@@ -17,9 +17,9 @@ from telegram.ext import (
 from travelkaki.bot.handlers import on_error, start
 from travelkaki.bot.links import add_command, on_message
 from travelkaki.bot.map import map_command
-from travelkaki.bot.pin import on_location, pin_command
+from travelkaki.bot.pin import on_link, on_location, pin_command
 from travelkaki.bot.plan import plan_command
-from travelkaki.bot.trip import newtrip
+from travelkaki.bot.trip import newtrip, on_migrate
 from travelkaki.bot.votes import on_callback, places_command
 from travelkaki.deps import Deps
 from travelkaki.planner.ask import on_poll
@@ -62,6 +62,14 @@ def build_application(token: str, deps: Deps | None = None) -> Application:
     app.add_handler(CallbackQueryHandler(on_callback))  # vote / wrong place / retry buttons
     # M2: poll counts arrive here, so ask_group can close a poll early.
     app.add_handler(PollHandler(on_poll))
+    # Text reply to a /pin prompt with a Google Maps link. Group -1 runs before the
+    # group-0 on_message; on_link raises ApplicationHandlerStop when it handled the message.
+    app.add_handler(
+        MessageHandler(
+            filters.UpdateType.MESSAGE & filters.REPLY & filters.TEXT & ~filters.COMMAND, on_link
+        ),
+        group=-1,
+    )
     app.add_error_handler(on_error)  # never silent, even when a handler crashes
     # Every other new message with text or a caption (photos/videos with links too).
     # UpdateType.MESSAGE = new messages only: an edit must not read a link twice.
@@ -78,6 +86,8 @@ def build_application(token: str, deps: Deps | None = None) -> Application:
             on_location,
         )
     )
+    # Group -> supergroup upgrade changes the chat id: move the trip to the new id.
+    app.add_handler(MessageHandler(filters.StatusUpdate.MIGRATE, on_migrate))
     return app
 
 

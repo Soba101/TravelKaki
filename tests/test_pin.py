@@ -3,6 +3,9 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+from telegram.ext import ApplicationHandlerStop
+
 from tests.fakes import make_deps, make_source
 from travelkaki.bot import pin
 from travelkaki.bot.cards import parse_callback
@@ -51,6 +54,15 @@ def _reply(to_id, location=None, venue=None, chat_id=1):
         reply_to_message=SimpleNamespace(message_id=to_id) if to_id else None,
         location=location,
         venue=venue,
+        reply_text=AsyncMock(),
+    )
+    return SimpleNamespace(effective_chat=SimpleNamespace(id=chat_id), effective_message=msg), msg
+
+
+def _text_reply(to_id, text, chat_id=1):
+    msg = SimpleNamespace(
+        reply_to_message=SimpleNamespace(message_id=to_id) if to_id else None,
+        text=text,
         reply_text=AsyncMock(),
     )
     return SimpleNamespace(effective_chat=SimpleNamespace(id=chat_id), effective_message=msg), msg
@@ -179,3 +191,79 @@ async def test_location_reply_in_wrong_chat_is_ignored(sessions):
     await pin.on_location(update, ctx)
     with sessions() as s:
         assert pq.get_place(s, place.id).lat is None
+
+
+PLACE_URL = "https://www.google.com/maps/place/X/@35.69,139.70,17z/data=!3d35.6938!4d139.7034"
+
+
+async def test_link_reply_saves_pin(sessions):
+    place = _place(sessions)
+    ctx = _ctx(sessions)
+    ctx.chat_data["pin_prompts"] = {55: place.id}
+    update, msg = _text_reply(55, f"here {PLACE_URL}")
+    with pytest.raises(ApplicationHandlerStop):  # handled: on_message must not also run
+        await pin.on_link(update, ctx)
+    with sessions() as s:
+        saved = pq.get_place(s, place.id)
+        assert (saved.lat, saved.lng) == (35.6938, 139.7034)
+    assert "Pinned Tiny Shop" in msg.reply_text.await_args.args[0]
+    assert ctx.chat_data["pin_prompts"] == {}
+
+
+async def test_short_link_is_resolved(sessions, monkeypatch):
+    place = _place(sessions)
+    ctx = _ctx(sessions)
+    ctx.chat_data["pin_prompts"] = {55: place.id}
+    resolve = AsyncMock(return_value=PLACE_URL)
+    monkeypatch.setattr(pin.gmaps_link, "resolve", resolve)
+    update, _ = _text_reply(55, "https://maps.app.goo.gl/abc123")
+    with pytest.raises(ApplicationHandlerStop):
+        await pin.on_link(update, ctx)
+    resolve.assert_awaited_once()
+    with sessions() as s:
+        assert pq.get_place(s, place.id).lat == 35.6938
+
+
+async def test_unreadable_link_keeps_prompt(sessions):
+    place = _place(sessions)
+    ctx = _ctx(sessions)
+    ctx.chat_data["pin_prompts"] = {55: place.id}
+    update, msg = _text_reply(55, "https://www.google.com/maps/place/Some+Shop")
+    with pytest.raises(ApplicationHandlerStop):
+        await pin.on_link(update, ctx)
+    assert "Couldn't read a location" in msg.reply_text.await_args.args[0]
+    assert ctx.chat_data["pin_prompts"] == {55: place.id}  # still usable
+    with sessions() as s:
+        assert pq.get_place(s, place.id).lat is None
+
+
+async def test_text_without_link_or_other_reply_falls_through(sessions):
+    place = _place(sessions)
+    ctx = _ctx(sessions)
+    ctx.chat_data["pin_prompts"] = {55: place.id}
+    for to_id, text in ((55, "just chatting"), (99, PLACE_URL), (None, PLACE_URL)):
+        update, msg = _text_reply(to_id, text)
+        await pin.on_link(update, ctx)  # no ApplicationHandlerStop
+        msg.reply_text.assert_not_awaited()
+    with sessions() as s:
+        assert pq.get_place(s, place.id).lat is None
+
+
+async def test_link_reply_in_wrong_chat_falls_through(sessions):
+    place = _place(sessions)
+    ctx = _ctx(sessions)
+    ctx.chat_data["pin_prompts"] = {55: place.id}
+    update, _ = _text_reply(55, PLACE_URL, chat_id=2)
+    await pin.on_link(update, ctx)
+    with sessions() as s:
+        assert pq.get_place(s, place.id).lat is None
+
+
+async def test_prompt_text_mentions_links(sessions):
+    place = _place(sessions)
+    ctx, q = _ctx(sessions), _tap(f"p:{place.id}")
+    await pin.pick(q, 1, place.id, ctx, ctx.bot_data["deps"])
+    assert (
+        "Google Maps link or a Telegram location for Tiny Shop"
+        in (ctx.bot.send_message.await_args.args[1])
+    )

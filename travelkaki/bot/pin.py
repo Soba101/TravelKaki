@@ -9,11 +9,12 @@ Why a reply: in groups with privacy mode on, bots still receive replies to their
 import logging
 
 from telegram import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ContextTypes
+from telegram.ext import ApplicationHandlerStop, ContextTypes
 
 from travelkaki.bot.cards import NO_TRIP
 from travelkaki.db import place_queries as pq
 from travelkaki.db import queries
+from travelkaki.geo import gmaps_link
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ def _chat_place(s, place_id: int, chat_id: int):
 
 async def _ask(bot, chat_id: int, place_id: int, name: str, chat_data: dict) -> None:
     """Send the ForceReply prompt and remember which place it is for."""
-    text = f"Reply to this with a location for {name}. Tip: 📎 → Location → search the shop name."
+    text = f"Reply to this with a Google Maps link or a Telegram location for {name}."
     sent = await bot.send_message(chat_id, text, reply_markup=ForceReply(selective=True))
     chat_data.setdefault("pin_prompts", {})[sent.message_id] = place_id
 
@@ -98,3 +99,39 @@ async def on_location(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     prompts.pop(replied.message_id, None)  # one reply per prompt
     log.info("pin set chat=%s place=%s", chat_id, place_id)
     await message.reply_text(f"📍 Pinned {name}. Open the map to see it.")
+
+
+async def on_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """A text reply to a pin prompt with a Google Maps link: save its coordinates.
+
+    Runs before on_message (handler group -1). When it handles the message it raises
+    ApplicationHandlerStop so the link is not also read as a place to add.
+    """
+    message, chat_id = update.effective_message, update.effective_chat.id
+    replied = message.reply_to_message
+    prompts = context.chat_data.get("pin_prompts", {})
+    place_id = prompts.get(replied.message_id) if replied else None
+    url = gmaps_link.find_url(message.text) if place_id is not None else None
+    if url is None:
+        return  # not a pin reply with a Maps link: let other handlers have it
+    deps = context.bot_data["deps"]
+    with deps.sessions() as s:
+        place = _chat_place(s, place_id, chat_id)  # same trip scoping as the buttons
+        name = place.name if place else None
+    if name is None:
+        return
+    if gmaps_link.is_short(url):
+        url = await gmaps_link.resolve(url)  # follow the redirect to the full link
+    coords = gmaps_link.parse_coords(url)
+    if coords is None:  # keep the prompt in chat_data so they can try again
+        await message.reply_text(
+            "Couldn't read a location from that link. Try a Telegram location, "
+            "or a Google Maps link to the exact place."
+        )
+        raise ApplicationHandlerStop
+    with deps.sessions() as s:
+        pq.set_pin(s, place_id, *coords)
+    prompts.pop(replied.message_id, None)  # one reply per prompt
+    log.info("pin set from link chat=%s place=%s", chat_id, place_id)
+    await message.reply_text(f"📍 Pinned {name}. Open the map to see it.")
+    raise ApplicationHandlerStop

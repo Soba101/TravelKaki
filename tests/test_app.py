@@ -66,3 +66,12 @@ def test_telegram_timeouts_are_generous():
     bot = build_application("123:fake-token").bot
     assert bot.request.read_timeout == 20
     assert bot.request._client.timeout.write == 20  # PTB has no public getter for this one
+
+
+def test_pin_link_handler_runs_before_on_message_and_migrate_is_registered():
+    from travelkaki.bot.pin import on_link
+    from travelkaki.bot.trip import on_migrate
+
+    app = build_application("123:fake-token")
+    assert any(h.callback is on_link for h in app.handlers[-1])  # group -1 comes first
+    assert any(h.callback is on_migrate for h in app.handlers[0])
