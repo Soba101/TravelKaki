@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from travelkaki.geo.distance import distance_m, viewbox
-from travelkaki.geo.nominatim import GeoResult, Nominatim
+from travelkaki.geo.nominatim import GeoResult, Nominatim, clean_name
 
 SHIBUYA = (35.6595, 139.7005)
 SHINJUKU = (35.6896, 139.7006)
@@ -125,3 +125,21 @@ async def test_search_reads_opening_hours():
 async def test_missing_extratags_is_none():
     geo, _ = _geo(lambda request: _hit(35.6, 139.7))
     assert (await geo.search("Somewhere, Tokyo")).opening_hours is None
+
+
+def test_clean_name_strips_brackets():
+    assert clean_name("Shibuya Morimoto (Yakitori)") == "Shibuya Morimoto"
+    assert clean_name("Udatsu  Sushi [Omakase] ") == "Udatsu Sushi"
+    assert clean_name("Ichiran") == "Ichiran"
+
+
+async def test_locate_query_excludes_bracket_text():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return _hit(35.66, 139.70)
+
+    geo, _ = _geo(handler)
+    await geo.locate("Shibuya Morimoto (Yakitori)", "Tokyo", TOKYO)
+    assert requests[0].url.params["q"] == "Shibuya Morimoto, Tokyo"
