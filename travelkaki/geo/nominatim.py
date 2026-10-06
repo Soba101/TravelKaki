@@ -12,6 +12,7 @@ Confidence rule (spec):
 
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass
 
@@ -24,6 +25,11 @@ log = logging.getLogger(__name__)
 
 URL = "https://nominatim.openstreetmap.org/search"
 NEAR_M = 50_000  # 50 km
+
+
+def clean_name(name: str) -> str:
+    """Drop (...) and [...] labels and extra spaces; Nominatim finds nothing with them."""
+    return " ".join(re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", name).split())
 
 
 @dataclass
@@ -88,7 +94,7 @@ class Nominatim:
 
     async def locate(self, name: str, city: str, center: tuple | None):
         """Find a place in the trip city. Returns (GeoResult or None, Confidence)."""
-        query = f"{name}, {city}"
+        query = f"{clean_name(name)}, {city}"  # stored name stays as is
         if center is not None:
             hit = await self.search(query, viewbox(center, NEAR_M / 1000))
             if hit:
